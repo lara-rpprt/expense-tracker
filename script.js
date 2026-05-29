@@ -1,0 +1,1080 @@
+// ═══════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════
+let S = { months: [], activeId: null };
+
+// Import queue for conflict resolution
+let _importQueue = [];
+let _importPending = null; // { month, resolve }
+
+function load() {
+  try { const s = localStorage.getItem('gm_v1'); if (s) S = JSON.parse(s); } catch(e) {}
+}
+function save() { localStorage.setItem('gm_v1', JSON.stringify(S)); }
+function getM() { return S.months.find(m => m.id === S.activeId) || null; }
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
+
+// Helpers timezone-safe: usan fecha LOCAL, no UTC (evita desfase de +/- 1 día según zona horaria)
+function todayISO() {
+  const d = new Date();
+  return [d.getFullYear(), String(d.getMonth()+1).padStart(2,'0'), String(d.getDate()).padStart(2,'0')].join('-');
+}
+function dateObjToISO(d) {
+  return [d.getFullYear(), String(d.getMonth()+1).padStart(2,'0'), String(d.getDate()).padStart(2,'0')].join('-');
+}
+
+// ═══════════════════════════════════════
+//  CALCULATIONS
+// ═══════════════════════════════════════
+
+// Returns total paid amount for an expense (partials OR actualAmount if paid)
+function paidAmt(e, rate) {
+  if (e.partialPayments && e.partialPayments.length > 0) {
+    // Sum of all partial payments
+    return e.partialPayments.reduce((s, p) => s + (+p.amount || 0), 0);
+  }
+  if (e.paid) {
+    const v = (e.actualAmount !== '' && e.actualAmount !== null && e.actualAmount !== undefined)
+      ? +e.actualAmount : +e.plannedAmount || 0;
+    return e.isUSD ? v * rate : v;
+  }
+  return 0;
+}
+
+// Returns planned amount in ARS
+function plannedARS(e, rate) {
+  return e.isUSD ? (+e.plannedAmount || 0) * rate : (+e.plannedAmount || 0);
+}
+
+// Returns remaining (unpaid) amount for an expense
+function remainingAmt(e, rate) {
+  const plan = plannedARS(e, rate);
+  if (e.paid) return 0;
+  const paid = paidAmt(e, rate);
+  return Math.max(0, plan - paid);
+}
+
+function calc(m) {
+  if (!m) return null;
+  const rate = m.usdRate || 1;
+  const inc  = m.income || {};
+  const bal  = m.balance || {};
+  const exps = m.expenses || [];
+
+  // Salario mes vencido NO suma al total disponible — solo se usa para calcular el aumento
+  const totalIncome = (+inc.salaryCurrentMonth||0) + (+inc.previousMonthLeftover||0);
+
+  // Planned = sum of all plannedARS (for unpaid) + paidAmt (for paid)
+  const totalPlanned = exps.reduce((s, e) => s + plannedARS(e, rate), 0);
+
+  // Paid = sum of paidAmt for all expenses (partials + fully paid)
+  const totalPaid = exps.reduce((s, e) => s + paidAmt(e, rate), 0);
+
+  // Remaining = sum of unpaid balance (planned - partials already paid)
+  const remaining = exps.reduce((s, e) => {
+    if (e.paid) return s;
+    return s + remainingAmt(e, rate);
+  }, 0);
+
+  let totalDays = 1, startD = null, endD = null;
+  if (m.startDate && m.endDate) {
+    startD = new Date(m.startDate + 'T00:00:00');
+    endD   = new Date(m.endDate   + 'T00:00:00');
+    totalDays = Math.max(1, Math.round((endD - startD) / 86400000) + 1);
+  }
+
+  const theoAvail  = totalIncome - totalPlanned;
+  const theoPerDay = theoAvail / totalDays;
+
+  const totalBal = (+bal.account||0) + (+bal.cash||0) + (+bal.fund||0) + (bal.includeSavings ? (+bal.savings||0) : 0);
+  const monthlyAvail = totalBal - remaining;
+
+  const refDate = m.refDate
+    ? new Date(m.refDate + 'T00:00:00')
+    : (() => { const d = new Date(); d.setHours(0,0,0,0); return d; })();
+  let daysLeft = 0;
+  if (endD) {
+    const e2 = new Date(endD); e2.setHours(0,0,0,0);
+    daysLeft = Math.max(0, Math.round((e2 - refDate) / 86400000) + 1);
+  }
+  const realPerDay = daysLeft > 0 ? monthlyAvail / daysLeft : 0;
+
+  return { totalIncome, totalPlanned, totalPaid, remaining, totalDays, theoAvail, theoPerDay, totalBal, monthlyAvail, daysLeft, realPerDay, refDate };
+}
+
+// ═══════════════════════════════════════
+//  FORMAT
+// ═══════════════════════════════════════
+function fmt(n) {
+  if (n == null || isNaN(n)) return '—';
+  return '$' + Math.round(n).toLocaleString('es-AR');
+}
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const [, m, d] = iso.split('-');
+  return (+d) + ' ' + ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'][+m-1];
+}
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ═══════════════════════════════════════
+//  SORT HELPERS
+// ═══════════════════════════════════════
+function sortedExpenses(exps) {
+  const withDate    = exps.filter(e => e.plannedDate).sort((a,b) => a.plannedDate.localeCompare(b.plannedDate));
+  const withoutDate = exps.filter(e => !e.plannedDate);
+  return [...withDate, ...withoutDate];
+}
+
+// ═══════════════════════════════════════
+//  RENDER
+// ═══════════════════════════════════════
+function render() {
+  const m = getM();
+
+  // Month selector
+  const sel = document.getElementById('monthSel');
+  sel.innerHTML = '<option value="">— Seleccioná un mes —</option>';
+  S.months.forEach(mo => {
+    const o = document.createElement('option');
+    o.value = mo.id; o.textContent = mo.name || mo.id;
+    if (mo.id === S.activeId) o.selected = true;
+    sel.appendChild(o);
+  });
+
+  if (!m) {
+    document.getElementById('noMonthScreen').style.display = '';
+    document.getElementById('monthView').style.display = 'none';
+    document.getElementById('cfgBar').style.display = 'none';
+    return;
+  }
+
+  document.getElementById('noMonthScreen').style.display = 'none';
+  document.getElementById('monthView').style.display = '';
+  document.getElementById('cfgBar').style.display = '';
+
+  // Config bar
+  document.getElementById('cfgName').value  = m.name || '';
+  document.getElementById('cfgStart').value = m.startDate || '';
+  document.getElementById('cfgEnd').value   = m.endDate || '';
+  document.getElementById('cfgUSD').value   = m.usdRate || '';
+
+  // Income inputs
+  const inc = m.income || {};
+  document.getElementById('incCurr').value = inc.salaryCurrentMonth || '';
+  document.getElementById('incPrev').value = inc.salaryPreviousMonth || '';
+  document.getElementById('incLeft').value = inc.previousMonthLeftover || '';
+
+  // Balance inputs
+  const bal = m.balance || {};
+  document.getElementById('balAcc').value   = bal.account || '';
+  document.getElementById('balCash').value  = bal.cash || '';
+  document.getElementById('balFund').value  = bal.fund || '';
+  document.getElementById('balSav').value   = bal.savings || '';
+  document.getElementById('togSav').checked = bal.includeSavings || false;
+
+  refreshCalcs();
+  renderPlanned(m);
+  renderPayments(m);
+  renderRescExpList(m);
+  calcRescatar();
+}
+
+function refreshCalcs() {
+  const m = getM(); if (!m) return;
+  const c = calc(m);
+  const rate = m.usdRate || 1;
+  const inc  = m.income || {};
+
+  document.getElementById('totalIncome').textContent = fmt(c.totalIncome);
+  document.getElementById('totalBal').textContent    = fmt(c.totalBal);
+
+  document.getElementById('mPlanned').textContent   = fmt(c.totalPlanned);
+  document.getElementById('mPaid').textContent      = fmt(c.totalPaid);
+  document.getElementById('mRemaining').textContent = fmt(c.remaining);
+  document.getElementById('mDaysTotal').textContent = c.totalDays + ' días';
+  document.getElementById('mDaysLeft').textContent  = c.daysLeft + ' días';
+  // Show ref date hint
+  const refEl = document.getElementById('mRefDate');
+  if (refEl) {
+    const m2 = getM();
+    const isCustom = !!(m2 && m2.refDate);
+    refEl.textContent = 'al ' + fmtDate(dateObjToISO(c.refDate)) + ' ✏';
+    refEl.style.color = isCustom ? 'var(--accent)' : 'var(--muted)';
+    refEl.title = isCustom
+      ? 'Fecha de consulta personalizada: ' + dateObjToISO(c.refDate) + ' — clic para editar'
+      : 'Usando hoy como fecha de consulta — clic para editar';
+  }
+
+  const td = document.getElementById('mTheoDay');
+  td.textContent = fmt(c.theoPerDay);
+  td.className = 'metric-val ' + (c.theoPerDay > 0 ? 'pos' : c.theoPerDay < 0 ? 'neg' : 'neu');
+
+  const ma = document.getElementById('mMonthlyAvail');
+  ma.textContent = fmt(c.monthlyAvail);
+  ma.style.color = c.monthlyAvail >= 0 ? 'var(--green)' : 'var(--red)';
+
+  const rd = document.getElementById('mRealDay');
+  rd.textContent = fmt(c.realPerDay);
+  rd.style.color = c.realPerDay >= 0 ? 'var(--accent)' : 'var(--red)';
+
+  // Salary diff
+  const curr = +inc.salaryCurrentMonth || 0;
+  const prev = +inc.salaryPreviousMonth || 0;
+  const diffRow = document.getElementById('salaryDiffRow');
+  if (curr > 0 && prev > 0) {
+    const diff = curr - prev;
+    const pct  = ((diff / prev) * 100).toFixed(1);
+    document.getElementById('diffARS').textContent = (diff >= 0 ? '+' : '') + fmt(diff);
+    document.getElementById('diffPCT').textContent = (diff >= 0 ? '+' : '') + pct + '%';
+    diffRow.style.display = '';
+  } else {
+    diffRow.style.display = 'none';
+  }
+
+  // Salary in USD
+  const usdRow = document.getElementById('salaryUSDRow');
+  if (curr > 0 && rate > 0) {
+    document.getElementById('salaryUSDVal').textContent = 'USD ' + (curr / rate).toFixed(2);
+    usdRow.style.display = '';
+  } else {
+    usdRow.style.display = 'none';
+  }
+
+  calcRescatar();
+}
+
+function renderPlanned(m) {
+  const exps   = m.expenses || [];
+  const rate   = m.usdRate || 1;
+  const c      = calc(m);
+  const sortOn = document.getElementById('togSortDate').checked;
+  const cnt    = document.getElementById('expCount');
+  const cont   = document.getElementById('plannedList');
+
+  cnt.textContent = exps.length + ' gasto' + (exps.length !== 1 ? 's' : '');
+
+  if (exps.length === 0) {
+    cont.innerHTML = '<div class="empty"><h3>Sin gastos previstos</h3><p>Usá el botón "+ Agregar gasto" para empezar.</p></div>';
+    return;
+  }
+
+  const displayExps = sortOn ? sortedExpenses(exps) : exps;
+
+  let html = `<table class="etable"><thead><tr>
+    ${!sortOn ? '<th style="width:20px"></th>' : ''}
+    <th>Gasto</th><th>Fecha prevista</th>
+    <th style="text-align:right">Monto</th><th style="text-align:right">Acciones</th>
+  </tr></thead><tbody id="expTbody">`;
+
+  displayExps.forEach((e, idx) => {
+    const amtARS  = plannedARS(e, rate);
+    const usdDisp = rate > 0 && !e.isUSD ? `<div class="e-usd">≈ USD ${(amtARS/rate).toFixed(2)}</div>` :
+                    e.isUSD ? `<div class="e-usd">USD ${(+e.plannedAmount||0).toFixed(2)}</div>` : '';
+    const installBadge = (e.installmentNum && e.installmentTotal)
+      ? `<div class="e-installment">Cuota ${e.installmentNum}/${e.installmentTotal}</div>` : '';
+
+    // Inline date editor
+    const dateDisplay = e.plannedDate
+      ? `<span class="e-date" onclick="showInlineDateEdit('${e.id}',this)" title="Clic para editar fecha">${fmtDate(e.plannedDate)}</span>`
+      : `<span class="e-date" onclick="showInlineDateEdit('${e.id}',this)" title="Agregar fecha" style="opacity:.4">—</span>`;
+
+    const dragHandle = !sortOn ? `<td><span class="drag-handle" title="Arrastrar para reordenar">⠿</span></td>` : '';
+
+    html += `<tr class="drag-row" data-id="${e.id}" draggable="${!sortOn}">
+      ${dragHandle}
+      <td>
+        <div class="e-name">${esc(e.name)}</div>
+        ${installBadge}
+      </td>
+      <td>
+        <div class="e-date-wrap">
+          ${dateDisplay}
+          <input type="date" class="e-date-inline" id="dti_${e.id}"
+            value="${e.plannedDate||''}"
+            onchange="saveInlineDate('${e.id}',this.value)"
+            onblur="hideInlineDateEdit('${e.id}')">
+          ${e.plannedDate ? `<button class="btn btn-ghost btn-sm btn-icon" style="width:18px;height:18px;font-size:10px" onclick="clearPlannedDate('${e.id}')" title="Limpiar fecha">✕</button>` : ''}
+        </div>
+      </td>
+      <td><div class="e-amt">${fmt(amtARS)}</div>${usdDisp}</td>
+      <td><div class="e-acts">
+        <button class="btn btn-ghost btn-sm btn-icon" onclick="openExpModal('${e.id}')" title="Editar">✏</button>
+        <button class="btn btn-danger btn-sm btn-icon" onclick="delExp('${e.id}')" title="Eliminar">✕</button>
+      </div></td>
+    </tr>`;
+  });
+
+  html += `</tbody></table>
+  <div class="tfooter">
+    <div class="tfoot-item">
+      <div class="tfoot-lbl">Total previstos</div>
+      <div class="tfoot-val" style="color:var(--accent)">${fmt(c.totalPlanned)}</div>
+    </div>
+    <div class="tfoot-item">
+      <div class="tfoot-lbl">Disponible teórico</div>
+      <div class="tfoot-val" style="color:${c.theoAvail>=0?'var(--green)':'var(--red)'}">${fmt(c.theoAvail)}</div>
+    </div>
+  </div>`;
+
+  cont.innerHTML = html;
+
+  // Init drag & drop if sort is off
+  if (!sortOn) initDragDrop();
+}
+
+function renderPayments(m) {
+  const exps = m.expenses || [];
+  const rate = m.usdRate || 1;
+  const c    = calc(m);
+  const cont = document.getElementById('paymentsList');
+  const sortOn = document.getElementById('togSortPayments')?.checked ?? true;
+
+  const countEl = document.getElementById('payCount');
+  if (countEl) countEl.textContent = exps.length + ' gasto' + (exps.length !== 1 ? 's' : '');
+
+  if (exps.length === 0) {
+    cont.innerHTML = '<div class="empty"><h3>Sin gastos cargados</h3><p>Primero agregá gastos en "Gastos previstos".</p></div>';
+    return;
+  }
+
+  // Ordenar o usar orden manual del array
+  let displayExps;
+  if (sortOn) {
+    displayExps = [...exps].sort((a, b) => {
+      const da = a.actualDate || a.plannedDate || 'zzz';
+      const db = b.actualDate || b.plannedDate || 'zzz';
+      return da.localeCompare(db);
+    });
+  } else {
+    displayExps = exps; // orden del array (mismo que en Gastos previstos)
+  }
+
+  let html = '<div id="payRowsContainer">';
+  displayExps.forEach(e => {
+    const planARS    = plannedARS(e, rate);
+    const paid       = paidAmt(e, rate);
+    const hasPartial = e.partialPayments && e.partialPayments.length > 0;
+    const checked    = e.paid ? 'checked' : '';
+    const nameClass  = e.paid ? 'p-name paid' : 'p-name';
+    const actualVal  = (e.actualAmount !== '' && e.actualAmount !== null && e.actualAmount !== undefined) ? e.actualAmount : '';
+    const actualDate = e.actualDate || '';
+    const dimStyle   = e.paid ? '' : 'opacity:.5';
+
+    const installBadge = (e.installmentNum && e.installmentTotal)
+      ? ` <span style="font-size:10px;color:var(--accent)">${e.installmentNum}/${e.installmentTotal}</span>` : '';
+
+    let statusBadge = '';
+    if (e.paid) {
+      statusBadge = '<span class="paid-badge">✓ Pagado</span>';
+    } else if (hasPartial) {
+      statusBadge = `<span class="partial-badge" onclick="openPartialModal('${e.id}')" title="Ver pagos parciales">◑ ${fmt(paid)}</span>`;
+    }
+
+    const dragHandle = !sortOn
+      ? `<span class="drag-handle p-drag-handle" title="Arrastrar para reordenar">⠿</span>`
+      : '';
+
+    html += `<div class="prow" data-id="${e.id}" draggable="${!sortOn}">
+      ${dragHandle}
+      <input type="checkbox" class="pcheck" ${checked} onchange="togglePaid('${e.id}',this.checked)">
+      <div class="p-info">
+        <div class="${nameClass}">${esc(e.name)}${installBadge}</div>
+        <div class="p-prev">Previsto: ${fmt(planARS)} · ${fmtDate(e.plannedDate)}</div>
+        ${hasPartial ? `<div style="font-size:11px;color:var(--accent);cursor:pointer" onclick="openPartialModal('${e.id}')">Ver ${e.partialPayments.length} pago${e.partialPayments.length>1?'s':''} parcial${e.partialPayments.length>1?'es':''}</div>` : ''}
+      </div>
+      <div class="p-controls">
+        <div style="display:flex;gap:4px">
+          <div style="display:flex;gap:2px;align-items:center">
+            <input type="date" class="p-date-in" value="${actualDate}" style="${dimStyle}"
+              onchange="updPayment('${e.id}','actualDate',this.value,this)"
+              onblur="flashSaved(this)" title="Fecha real de pago">
+            <button class="btn btn-ghost btn-sm btn-icon" style="width:20px;height:20px;font-size:10px;opacity:.5;flex-shrink:0" onclick="clearActualDate('${e.id}')" title="Limpiar fecha">✕</button>
+          </div>
+          <input type="number" class="p-amt-in" value="${actualVal}" placeholder="${Math.round(planARS)}" style="${dimStyle}"
+            oninput="updPayment('${e.id}','actualAmount',this.value,this)"
+            onblur="flashSaved(this)" title="Monto real pagado">
+        </div>
+        <div style="display:flex;gap:4px;justify-content:flex-end;flex-wrap:wrap">
+          ${statusBadge}
+          <button class="btn btn-ghost btn-sm" onclick="openPartialModal('${e.id}')" title="Pagos parciales" style="font-size:11px;padding:2px 7px">◑ Parcial</button>
+        </div>
+      </div>
+    </div>`;
+  });
+
+  html += `</div>
+  <div class="tfooter" style="margin-top:10px">
+    <div class="tfoot-item">
+      <div class="tfoot-lbl">Pagado</div>
+      <div class="tfoot-val" style="color:var(--green)">${fmt(c.totalPaid)}</div>
+    </div>
+    <div class="tfoot-item">
+      <div class="tfoot-lbl">Por pagar</div>
+      <div class="tfoot-val" style="color:var(--muted)">${fmt(c.remaining)}</div>
+    </div>
+  </div>`;
+
+  cont.innerHTML = html;
+
+  if (!sortOn) initPayDragDrop();
+}
+
+function renderRescExpList(m) {
+  const exps = (m && m.expenses) ? m.expenses.filter(e => !e.paid) : [];
+  const cont = document.getElementById('rescExpList');
+  if (!cont) return;
+  if (exps.length === 0) {
+    cont.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:4px 0">No hay gastos pendientes</div>';
+    return;
+  }
+  const rate = m.usdRate || 1;
+  cont.innerHTML = exps.map(e => {
+    const amt = remainingAmt(e, rate);
+    return `<div class="resc-exp-item">
+      <input type="checkbox" id="rescExp_${e.id}" onchange="calcRescatar()" style="accent-color:var(--accent)">
+      <label for="rescExp_${e.id}">${esc(e.name)} <span style="color:var(--muted)">(${fmt(amt)})</span></label>
+    </div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════
+//  PAYMENTS SORT & DRAG DROP
+// ═══════════════════════════════════════
+function onPaymentSortToggle() {
+  renderPayments(getM());
+}
+
+let _payDragSrcId = null;
+
+function initPayDragDrop() {
+  const cont = document.getElementById('payRowsContainer');
+  if (!cont) return;
+  cont.querySelectorAll('.prow[data-id]').forEach(row => {
+    row.addEventListener('dragstart', e => {
+      _payDragSrcId = row.dataset.id;
+      // Small delay so the row isn't already hidden when drag ghost renders
+      setTimeout(() => { row.style.opacity = '0.4'; }, 0);
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    row.addEventListener('dragend', () => {
+      row.style.opacity = '';
+      cont.querySelectorAll('.prow').forEach(r => r.classList.remove('drag-over-p'));
+    });
+    row.addEventListener('dragover', e => {
+      e.preventDefault();
+      cont.querySelectorAll('.prow').forEach(r => r.classList.remove('drag-over-p'));
+      row.classList.add('drag-over-p');
+    });
+    row.addEventListener('drop', e => {
+      e.preventDefault();
+      if (_payDragSrcId && _payDragSrcId !== row.dataset.id) {
+        reorderExpenses(_payDragSrcId, row.dataset.id);
+        renderPayments(getM());
+      }
+    });
+  });
+}
+
+
+function showInlineDateEdit(id, span) {
+  const input = document.getElementById('dti_' + id);
+  if (!input) return;
+  span.style.display = 'none';
+  input.style.display = 'block';
+  input.focus();
+}
+
+function hideInlineDateEdit(id) {
+  const input = document.getElementById('dti_' + id);
+  if (!input) return;
+  // Small delay so onchange fires first
+  setTimeout(() => { input.style.display = 'none'; renderPlanned(getM()); }, 150);
+}
+
+function saveInlineDate(id, val) {
+  const m = getM(); if (!m) return;
+  const e = m.expenses.find(x => x.id === id); if (!e) return;
+  e.plannedDate = val;
+  save();
+  refreshCalcs();
+}
+
+function clearPlannedDate(id) {
+  const m = getM(); if (!m) return;
+  const e = m.expenses.find(x => x.id === id); if (!e) return;
+  e.plannedDate = '';
+  save(); renderPlanned(m); renderPayments(m); calcRescatar();
+}
+
+// ═══════════════════════════════════════
+//  DRAG & DROP
+// ═══════════════════════════════════════
+let _dragSrcId = null;
+
+function initDragDrop() {
+  const tbody = document.getElementById('expTbody');
+  if (!tbody) return;
+  tbody.querySelectorAll('.drag-row').forEach(row => {
+    row.addEventListener('dragstart', e => {
+      _dragSrcId = row.dataset.id;
+      row.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    row.addEventListener('dragend', () => {
+      row.classList.remove('dragging');
+      tbody.querySelectorAll('.drag-row').forEach(r => r.classList.remove('drag-over'));
+    });
+    row.addEventListener('dragover', e => {
+      e.preventDefault();
+      tbody.querySelectorAll('.drag-row').forEach(r => r.classList.remove('drag-over'));
+      row.classList.add('drag-over');
+    });
+    row.addEventListener('drop', e => {
+      e.preventDefault();
+      if (_dragSrcId && _dragSrcId !== row.dataset.id) {
+        reorderExpenses(_dragSrcId, row.dataset.id);
+      }
+    });
+  });
+}
+
+function reorderExpenses(srcId, tgtId) {
+  const m = getM(); if (!m) return;
+  const exps  = m.expenses;
+  const srcIdx = exps.findIndex(e => e.id === srcId);
+  const tgtIdx = exps.findIndex(e => e.id === tgtId);
+  if (srcIdx < 0 || tgtIdx < 0) return;
+  const [item] = exps.splice(srcIdx, 1);
+  exps.splice(tgtIdx, 0, item);
+  save();
+  renderPlanned(m);
+}
+
+function onSortToggle() {
+  renderPlanned(getM());
+}
+
+// ═══════════════════════════════════════
+//  RESCATAR
+// ═══════════════════════════════════════
+function toggleRescExpList() {
+  const list  = document.getElementById('rescExpList');
+  const arrow = document.getElementById('rescExpArrow');
+  if (!list) return;
+  const open = list.style.display !== 'none';
+  list.style.display = open ? 'none' : 'block';
+  arrow.classList.toggle('open', !open);
+}
+
+function clearRescDates() {
+  document.getElementById('rescFrom').value = '';
+  document.getElementById('rescTo').value   = '';
+  document.getElementById('rescDaysText').textContent = 'Seleccioná un rango de fechas';
+  document.getElementById('rescAmount').textContent   = '—';
+  document.getElementById('rescPerDay').textContent   = '';
+}
+
+function calcRescatar() {
+  const m    = getM();
+  const from = document.getElementById('rescFrom').value;
+  const to   = document.getElementById('rescTo').value;
+
+  if (!from || !to || !m) {
+    document.getElementById('rescDaysText').textContent = 'Seleccioná un rango de fechas';
+    document.getElementById('rescAmount').textContent   = '—';
+    document.getElementById('rescPerDay').textContent   = '';
+    return;
+  }
+
+  const f    = new Date(from+'T00:00:00'), t = new Date(to+'T00:00:00');
+  const days = Math.max(1, Math.round((t - f) / 86400000) + 1);
+  const c    = calc(m);
+
+  let baseAmt = c.realPerDay * days;
+
+  // Restar dinero en cuenta
+  if (document.getElementById('rescTogAccount').checked) {
+    const bal = m.balance || {};
+    baseAmt -= (+bal.account || 0);
+  }
+
+  // Sumar gastos previstos seleccionados
+  const rate = m.usdRate || 1;
+  const exps = (m.expenses || []).filter(e => !e.paid);
+  exps.forEach(e => {
+    const cb = document.getElementById('rescExp_' + e.id);
+    if (cb && cb.checked) {
+      baseAmt += remainingAmt(e, rate);
+    }
+  });
+
+  document.getElementById('rescDaysText').textContent = `${days} día${days!==1?'s':''} · ${fmtDate(from)} → ${fmtDate(to)}`;
+  document.getElementById('rescAmount').textContent   = fmt(baseAmt);
+  document.getElementById('rescPerDay').textContent   = fmt(c.realPerDay) + ' / día';
+}
+
+// ═══════════════════════════════════════
+//  MUTATIONS
+// ═══════════════════════════════════════
+function switchMonth(id) { S.activeId = id || null; save(); render(); }
+
+function updateCfg(field, val) {
+  const m = getM(); if (!m) return;
+  m[field] = val; save(); refreshCalcs();
+}
+
+function updateInc(field, val) {
+  const m = getM(); if (!m) return;
+  if (!m.income) m.income = {};
+  m.income[field] = +val || 0; save(); refreshCalcs();
+}
+
+function updateBal(field, val) {
+  const m = getM(); if (!m) return;
+  if (!m.balance) m.balance = {};
+  m.balance[field] = field === 'includeSavings' ? val : (+val || 0);
+  save(); refreshCalcs();
+}
+
+function togglePaid(id, checked) {
+  const m = getM(); if (!m) return;
+  const e = m.expenses.find(x => x.id === id); if (!e) return;
+  e.paid = checked;
+  if (checked) {
+    if (!e.actualDate) e.actualDate = new Date().toISOString().split('T')[0];
+    // Si tiene pagos parciales, completar el monto al previsto
+    if (e.partialPayments && e.partialPayments.length > 0) {
+      e.actualAmount = e.plannedAmount || 0;
+    }
+  }
+  save();
+  renderPayments(m);
+  refreshCalcs();
+}
+
+function updPayment(id, field, val, inputEl) {
+  const m = getM(); if (!m) return;
+  const e = m.expenses.find(x => x.id === id); if (!e) return;
+  e[field] = val;
+  save();
+  refreshCalcs();
+}
+
+function clearActualDate(id) {
+  const m = getM(); if (!m) return;
+  const e = m.expenses.find(x => x.id === id); if (!e) return;
+  e.actualDate = '';
+  save(); renderPayments(m); refreshCalcs();
+}
+
+function flashSaved(el) {
+  el.classList.add('saved-flash');
+  setTimeout(() => el.classList.remove('saved-flash'), 700);
+}
+
+function delExp(id) {
+  const m = getM(); if (!m) return;
+  if (!confirm('¿Eliminar este gasto?')) return;
+  m.expenses = m.expenses.filter(e => e.id !== id);
+  save(); render();
+}
+
+function deleteMonth() {
+  const m = getM(); if (!m) return;
+  if (!confirm(`¿Eliminar el mes "${m.name}"? Esta acción no se puede deshacer.`)) return;
+  S.months = S.months.filter(x => x.id !== m.id);
+  S.activeId = S.months.length > 0 ? S.months[S.months.length - 1].id : null;
+  save(); render();
+}
+
+// ═══════════════════════════════════════
+//  PARTIAL PAYMENTS
+// ═══════════════════════════════════════
+function openPartialModal(expId) {
+  const m = getM(); if (!m) return;
+  const e = m.expenses.find(x => x.id === expId); if (!e) return;
+  document.getElementById('partialExpId').value   = expId;
+  document.getElementById('partialExpName').textContent = e.name;
+  document.getElementById('partialDate').value    = '';
+  document.getElementById('partialAmt').value     = '';
+  renderPartialList(e, m.usdRate || 1);
+  document.getElementById('partialModal').style.display = 'flex';
+}
+
+function closePartialModal() {
+  document.getElementById('partialModal').style.display = 'none';
+}
+
+function renderPartialList(e, rate) {
+  const cont = document.getElementById('partialList');
+  const partials = e.partialPayments || [];
+  const planARS  = plannedARS(e, rate);
+  const totalPaid = partials.reduce((s, p) => s + (+p.amount || 0), 0);
+
+  if (partials.length === 0) {
+    cont.innerHTML = '<div style="font-size:12px;color:var(--muted);margin-bottom:8px">Sin pagos parciales registrados.</div>';
+    return;
+  }
+
+  let html = '<div style="margin-bottom:10px">';
+  partials.forEach(p => {
+    html += `<div class="partial-item">
+      <span class="partial-item-date">${p.date ? fmtDate(p.date) : '—'}</span>
+      <span class="partial-item-amt">${fmt(+p.amount || 0)}</span>
+      <button class="btn btn-danger btn-sm btn-icon" onclick="removePartial('${e.id}','${p.id}')" title="Eliminar">✕</button>
+    </div>`;
+  });
+  html += `<div style="display:flex;justify-content:space-between;padding-top:8px;border-top:1px solid var(--border);margin-top:4px">
+    <span style="font-size:12px;color:var(--label)">Total pagado</span>
+    <span style="font-family:'DM Mono',monospace;font-size:13px;color:var(--accent)">${fmt(totalPaid)}</span>
+  </div>
+  <div style="display:flex;justify-content:space-between;padding-top:4px">
+    <span style="font-size:12px;color:var(--label)">Saldo restante</span>
+    <span style="font-family:'DM Mono',monospace;font-size:13px;color:var(--muted)">${fmt(Math.max(0, planARS - totalPaid))}</span>
+  </div>`;
+  html += '</div>';
+  cont.innerHTML = html;
+}
+
+function addPartialPayment() {
+  const expId = document.getElementById('partialExpId').value;
+  const date  = document.getElementById('partialDate').value;
+  const amt   = parseFloat(document.getElementById('partialAmt').value);
+
+  if (!amt || isNaN(amt)) { alert('Ingresá un monto válido'); return; }
+
+  const m = getM(); if (!m) return;
+  const e = m.expenses.find(x => x.id === expId); if (!e) return;
+  if (!e.partialPayments) e.partialPayments = [];
+  e.partialPayments.push({ id: uid(), date: date || '', amount: amt });
+
+  document.getElementById('partialDate').value = '';
+  document.getElementById('partialAmt').value  = '';
+
+  save();
+  renderPartialList(e, m.usdRate || 1);
+  renderPayments(m);
+  refreshCalcs();
+}
+
+function removePartial(expId, partialId) {
+  const m = getM(); if (!m) return;
+  const e = m.expenses.find(x => x.id === expId); if (!e) return;
+  e.partialPayments = (e.partialPayments || []).filter(p => p.id !== partialId);
+  save();
+  renderPartialList(e, m.usdRate || 1);
+  renderPayments(m);
+  refreshCalcs();
+}
+
+// ═══════════════════════════════════════
+//  EXPENSE MODAL
+// ═══════════════════════════════════════
+function clearExpDate() {
+  document.getElementById('expDate').value = '';
+}
+
+function openExpModal(editId) {
+  const modal = document.getElementById('expModal');
+  document.getElementById('editExpId').value = editId || '';
+  if (editId) {
+    const e = getM().expenses.find(x => x.id === editId);
+    document.getElementById('expModalTitle').textContent = 'Editar gasto';
+    document.getElementById('expName').value       = e.name || '';
+    document.getElementById('expAmt').value        = e.plannedAmount || '';
+    document.getElementById('expCurr').value       = e.isUSD ? 'USD' : 'ARS';
+    document.getElementById('expDate').value       = e.plannedDate || '';
+    document.getElementById('expInstNum').value    = e.installmentNum || '';
+    document.getElementById('expInstTotal').value  = e.installmentTotal || '';
+  } else {
+    document.getElementById('expModalTitle').textContent = 'Agregar gasto';
+    document.getElementById('expName').value       = '';
+    document.getElementById('expAmt').value        = '';
+    document.getElementById('expCurr').value       = 'ARS';
+    document.getElementById('expDate').value       = '';
+    document.getElementById('expInstNum').value    = '';
+    document.getElementById('expInstTotal').value  = '';
+  }
+  modal.style.display = 'flex';
+  setTimeout(() => document.getElementById('expName').focus(), 50);
+}
+
+function closeExpModal() { document.getElementById('expModal').style.display = 'none'; }
+
+function saveExp() {
+  const name     = document.getElementById('expName').value.trim();
+  const amt      = parseFloat(document.getElementById('expAmt').value);
+  const curr     = document.getElementById('expCurr').value;
+  const date     = document.getElementById('expDate').value;
+  const instNum  = parseInt(document.getElementById('expInstNum').value) || null;
+  const instTot  = parseInt(document.getElementById('expInstTotal').value) || null;
+  const eid      = document.getElementById('editExpId').value;
+
+  if (!name) { alert('El nombre es obligatorio'); return; }
+  const m = getM(); if (!m) return;
+  if (!m.expenses) m.expenses = [];
+
+  if (eid) {
+    const e = m.expenses.find(x => x.id === eid);
+    if (e) {
+      e.name            = name;
+      e.plannedAmount   = amt || 0;
+      e.isUSD           = curr === 'USD';
+      e.plannedDate     = date;
+      e.installmentNum  = instNum;
+      e.installmentTotal = instTot;
+    }
+  } else {
+    m.expenses.push({
+      id: uid(), name, plannedAmount: amt || 0, isUSD: curr === 'USD',
+      plannedDate: date, installmentNum: instNum, installmentTotal: instTot,
+      paid: false, actualDate: '', actualAmount: '', partialPayments: []
+    });
+  }
+  save(); closeExpModal(); render();
+}
+
+// ═══════════════════════════════════════
+//  NEW MONTH MODAL
+// ═══════════════════════════════════════
+function openNewMonthModal() {
+  const last = S.months[S.months.length - 1];
+  let sugName = '', sugUSD = '';
+  if (last) {
+    const mNames = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+    if (last.endDate) {
+      const d  = new Date(last.endDate + 'T00:00:00');
+      const nm = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+      sugName  = mNames[nm.getMonth()] + ' ' + nm.getFullYear();
+    }
+    sugUSD = last.usdRate || '';
+    document.getElementById('nmCopySection').style.display = '';
+  } else {
+    document.getElementById('nmCopySection').style.display = 'none';
+  }
+  document.getElementById('nmName').value  = sugName;
+  document.getElementById('nmStart').value = '';
+  document.getElementById('nmEnd').value   = '';
+  document.getElementById('nmUSD').value   = sugUSD;
+  const r = document.querySelector('input[name="nmCopy"][value="copy"]');
+  if (r) r.checked = true;
+  document.getElementById('nmModal').style.display = 'flex';
+  setTimeout(() => document.getElementById('nmName').focus(), 50);
+}
+
+function closeNmModal() { document.getElementById('nmModal').style.display = 'none'; }
+
+function createMonth() {
+  const name  = document.getElementById('nmName').value.trim();
+  const start = document.getElementById('nmStart').value;
+  const end   = document.getElementById('nmEnd').value;
+  const usd   = parseFloat(document.getElementById('nmUSD').value) || 0;
+  const copy  = document.querySelector('input[name="nmCopy"]:checked')?.value;
+  if (!name) { alert('El nombre es obligatorio'); return; }
+  const last = S.months[S.months.length - 1];
+  let expenses = [];
+  if (copy === 'copy' && last && last.expenses) {
+    expenses = last.expenses.map(e => ({
+      ...e, id: uid(), paid: false, actualDate: '', actualAmount: '', partialPayments: []
+    }));
+  }
+  const nm = {
+    id: uid(), name, startDate: start, endDate: end, usdRate: usd,
+    income: { salaryCurrentMonth: 0, salaryPreviousMonth: 0, previousMonthLeftover: 0 },
+    expenses,
+    balance: { account: 0, cash: 0, fund: 0, savings: 0, includeSavings: false }
+  };
+  S.months.push(nm);
+  S.activeId = nm.id;
+  save(); closeNmModal(); render();
+}
+
+// ═══════════════════════════════════════
+//  TABS
+// ═══════════════════════════════════════
+function switchTab(tab, btn) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('tabPlanned').style.display  = tab === 'planned'  ? '' : 'none';
+  document.getElementById('tabPayments').style.display = tab === 'payments' ? '' : 'none';
+}
+
+// ═══════════════════════════════════════
+//  EXPORT
+// ═══════════════════════════════════════
+function openExportModal() {
+  document.getElementById('exportMultiple').checked = false;
+  document.getElementById('exportMonthList').style.display = 'none';
+  document.getElementById('exportModal').style.display = 'flex';
+}
+
+function closeExportModal() {
+  document.getElementById('exportModal').style.display = 'none';
+}
+
+function toggleExportMultiple() {
+  const multi = document.getElementById('exportMultiple').checked;
+  const list  = document.getElementById('exportMonthList');
+  if (multi) {
+    list.style.display = 'block';
+    list.innerHTML = S.months.map(mo => `
+      <div class="export-month-item">
+        <input type="checkbox" id="expM_${mo.id}" value="${mo.id}" checked style="accent-color:var(--accent)">
+        <label for="expM_${mo.id}">${esc(mo.name || mo.id)}</label>
+      </div>
+    `).join('');
+  } else {
+    list.style.display = 'none';
+  }
+}
+
+function doExport() {
+  const multi = document.getElementById('exportMultiple').checked;
+  let toExport;
+  let filename;
+
+  if (!multi) {
+    // Export active month only
+    const m = getM();
+    if (!m) { alert('No hay mes activo'); return; }
+    toExport = { months: [m], activeId: m.id };
+    filename = 'gastos_' + (m.name || m.id).replace(/\s+/g,'_') + '_' + new Date().toISOString().slice(0,10) + '.json';
+  } else {
+    const checked = [...document.querySelectorAll('#exportMonthList input[type="checkbox"]:checked')].map(cb => cb.value);
+    if (checked.length === 0) { alert('Seleccioná al menos un mes'); return; }
+    const months = S.months.filter(mo => checked.includes(mo.id));
+    toExport = { months, activeId: S.activeId };
+    filename = 'gastos_' + new Date().toISOString().slice(0,10) + '.json';
+  }
+
+  const blob = new Blob([JSON.stringify(toExport, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  closeExportModal();
+}
+
+// ═══════════════════════════════════════
+//  IMPORT (with conflict resolution)
+// ═══════════════════════════════════════
+function importData(ev) {
+  const f = ev.target.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = async e => {
+    try {
+      const d = JSON.parse(e.target.result);
+      if (!d.months) throw new Error('Formato inválido');
+
+      _importQueue = [...d.months];
+      await processImportQueue();
+      save(); render();
+    } catch(err) {
+      alert('Error al importar: ' + err.message);
+    }
+  };
+  r.readAsText(f);
+  ev.target.value = '';
+}
+
+async function processImportQueue() {
+  while (_importQueue.length > 0) {
+    const incoming = _importQueue.shift();
+    const existingByName = S.months.find(m => m.name === incoming.name);
+
+    if (existingByName) {
+      const action = await askConflict(incoming.name);
+      if (action === 'skip') continue;
+      if (action === 'replace') {
+        const idx = S.months.findIndex(m => m.name === incoming.name);
+        S.months[idx] = { ...incoming };
+      }
+      if (action === 'rename') {
+        const newName = document.getElementById('conflictNewName').value.trim() || incoming.name + ' (importado)';
+        S.months.push({ ...incoming, id: uid(), name: newName });
+      }
+    } else {
+      // Check ID collision (different name, same id)
+      const existingById = S.months.find(m => m.id === incoming.id);
+      if (existingById) incoming.id = uid();
+      S.months.push(incoming);
+    }
+  }
+}
+
+function askConflict(monthName) {
+  return new Promise(resolve => {
+    document.getElementById('conflictMonthName').textContent = monthName;
+    document.getElementById('conflictNewName').value = monthName + ' (importado)';
+    document.getElementById('importConflictModal').style.display = 'flex';
+    _importPending = resolve;
+  });
+}
+
+function resolveConflict(action) {
+  document.getElementById('importConflictModal').style.display = 'none';
+  if (_importPending) {
+    _importPending(action);
+    _importPending = null;
+  }
+}
+
+// ═══════════════════════════════════════
+//  REF DATE MODAL
+// ═══════════════════════════════════════
+function openRefDateModal() {
+  const m = getM(); if (!m) return;
+  document.getElementById('refDateInput').value = m.refDate || todayISO();
+  document.getElementById('refDateModal').style.display = 'flex';
+  setTimeout(() => document.getElementById('refDateInput').focus(), 50);
+}
+
+function closeRefDateModal() {
+  document.getElementById('refDateModal').style.display = 'none';
+}
+
+function saveRefDate() {
+  const m = getM(); if (!m) return;
+  const val = document.getElementById('refDateInput').value;
+  if (!val) {
+    // Si quedó vacío, equivale a resetear
+    m.refDate = null;
+  } else {
+    m.refDate = val;
+  }
+  save();
+  closeRefDateModal();
+  refreshCalcs();
+}
+
+function clearRefDate() {
+  const m = getM(); if (!m) return;
+  m.refDate = null;
+  save(); closeRefDateModal(); refreshCalcs();
+}
+
+// ═══════════════════════════════════════
+//  KEYBOARD
+// ═══════════════════════════════════════
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    closeExpModal(); closeNmModal(); closePartialModal(); closeExportModal(); closeRefDateModal();
+    document.getElementById('importConflictModal').style.display = 'none';
+  }
+  if (e.key === 'Enter' && document.getElementById('expModal').style.display !== 'none') {
+    if (document.activeElement.tagName !== 'BUTTON') saveExp();
+  }
+  if (e.key === 'Enter' && document.getElementById('nmModal').style.display !== 'none') {
+    if (document.activeElement.tagName !== 'BUTTON') createMonth();
+  }
+  if (e.key === 'Enter' && document.getElementById('partialModal').style.display !== 'none') {
+    if (document.activeElement.tagName !== 'BUTTON') addPartialPayment();
+  }
+});
+
+// ═══════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════
+load();
+render();
