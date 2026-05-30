@@ -1,6 +1,17 @@
 // ═══════════════════════════════════════════════════════════
 //  SYNC.JS — Arquitectura "La Nube es la Fuente de la Verdad"
-//  v3 — Modal asíncrono + validación de escritura en Supabase
+//  v4 — Fix definitivo del bug de F5
+//
+//  Cambios v4:
+//  · createClient() se instancia dentro de DOMContentLoaded,
+//    evitando que el SDK procese la sesión antes de que el
+//    listener de onAuthStateChange esté registrado.
+//  · onAuthStateChange se registra SINCRÓNICAMENTE (sin await,
+//    sin .then()) como primera instrucción después de createClient(),
+//    cerrando la brecha de timing que hacía perder INITIAL_SESSION.
+//  · _pullFromCloud() tiene timeout propio de 15 s para que un
+//    request colgado no freeze _loginSync() silenciosamente.
+//  · Logs de debug controlados por la constante DEBUG.
 //
 //  API pública:
 //    window.Sync.notifyChange()   → llamar después de cada save()
@@ -20,21 +31,25 @@
   const LS_DRAFT_KEY      = 'gm_v1_borrador';
   const DEBOUNCE_MS       = 3000;
   const PUSH_TIMEOUT_MS   = 20000;
+  const PULL_TIMEOUT_MS   = 15000;
 
-  // ─────────────────────────────────────────
-  //  CLIENTE SUPABASE
-  // ─────────────────────────────────────────
-  const _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  // Cambiá a true para ver logs detallados en consola durante pruebas.
+  // Dejalo en false para producción.
+  const DEBUG = true;
+  function _log(...args) { if (DEBUG) console.log('[sync]', ...args); }
 
   // ─────────────────────────────────────────
   //  ESTADO INTERNO
+  //  _sb se inicializa dentro de _init() para garantizar que
+  //  createClient() ocurra después de que el DOM esté listo.
   // ─────────────────────────────────────────
+  let _sb            = null;
   let _currentUser   = null;
   let _debounceTimer = null;
   let _isSyncing     = false;
 
   // Evita doble disparo de _loginSync() cuando Supabase v2 emite
-  // INITIAL_SESSION y SIGNED_IN casi simultáneamente en un redirect OAuth.
+  // INITIAL_SESSION y SIGNED_IN casi simultáneamente (redirect OAuth).
   let _loginSyncDone = false;
 
   // ─────────────────────────────────────────
@@ -76,33 +91,32 @@
   // ─────────────────────────────────────────
   //  MODAL ASÍNCRONO
   //
-  //  Reemplaza confirm() y alert() nativos.
-  //  Devuelve una Promise que resuelve con:
-  //    · true/false  →  para diálogos de elección (confirm)
-  //    · undefined   →  para avisos (alert, un solo botón)
+  //  Solo se llama cuando el DOM está garantizadamente listo
+  //  (todo ocurre dentro de _init() → DOMContentLoaded).
+  //  El fallback a confirm() nativo queda como red de seguridad
+  //  para errores de HTML, pero en flujo normal nunca se activa.
   //
   //  config = {
-  //    icon:       string  (emoji decorativo, opcional)
-  //    title:      string  (título del modal)
-  //    message:    string  (párrafo explicativo, soporta <br>)
-  //    detail:     string  (texto secundario más pequeño, opcional)
-  //    confirmText: string (texto botón primario, opcional)
-  //    cancelText:  string (texto botón secundario, opcional)
-  //    confirmClass: string (clase extra para btn primario, por defecto btn-primary)
-  //    isAlert:     bool   (modo alerta: un solo botón "Entendido")
+  //    icon:         string  (emoji decorativo, opcional)
+  //    title:        string
+  //    message:      string  (soporta <br>)
+  //    detail:       string  (texto secundario, opcional)
+  //    confirmText:  string  (botón primario)
+  //    cancelText:   string  (botón secundario)
+  //    confirmClass: string  (clase extra del botón primario)
+  //    isAlert:      bool    (un solo botón "Entendido")
   //  }
   // ─────────────────────────────────────────
   function _modal(config) {
     return new Promise(resolve => {
       const ov = document.getElementById('syncModal');
       if (!ov) {
-        // Fallback defensivo si el HTML todavía no tiene el modal
+        console.error('[sync] #syncModal no encontrado en el DOM. Revisar index.html.');
         if (config.isAlert) { resolve(undefined); return; }
         resolve(confirm(config.title + '\n\n' + config.message));
         return;
       }
 
-      // Poblar contenido
       const iconEl    = document.getElementById('syncModalIcon');
       const titleEl   = document.getElementById('syncModalTitle');
       const msgEl     = document.getElementById('syncModalMessage');
@@ -110,42 +124,39 @@
       const confirmEl = document.getElementById('syncModalConfirm');
       const cancelEl  = document.getElementById('syncModalCancel');
 
-      if (iconEl)   iconEl.textContent  = config.icon || '';
-      if (titleEl)  titleEl.textContent = config.title || '';
-      if (msgEl)    msgEl.innerHTML     = config.message || '';
+      if (iconEl)  iconEl.textContent = config.icon || '';
+      if (titleEl) titleEl.textContent = config.title || '';
+      if (msgEl)   msgEl.innerHTML = config.message || '';
 
       if (detailEl) {
-        detailEl.innerHTML    = config.detail || '';
+        detailEl.innerHTML = config.detail || '';
         detailEl.style.display = config.detail ? '' : 'none';
       }
 
-      // Modo alerta (un solo botón)
       if (config.isAlert) {
         confirmEl.textContent = 'Entendido';
-        confirmEl.className   = 'btn btn-primary';
+        confirmEl.className = 'btn btn-primary';
         cancelEl.style.display = 'none';
-        const onConfirm = () => { _closeModal(); resolve(undefined); };
-        confirmEl.replaceWith(confirmEl.cloneNode(true));
-        document.getElementById('syncModalConfirm').addEventListener('click', onConfirm, { once: true });
+        const newConfirm = confirmEl.cloneNode(true);
+        confirmEl.replaceWith(newConfirm);
+        document.getElementById('syncModalConfirm')
+          .addEventListener('click', () => { _closeModal(); resolve(undefined); }, { once: true });
       } else {
-        // Modo confirm (dos botones)
         const confirmClass = config.confirmClass || 'btn-primary';
-        confirmEl.textContent  = config.confirmText  || 'Aceptar';
-        confirmEl.className    = `btn ${confirmClass}`;
-        cancelEl.textContent   = config.cancelText   || 'Cancelar';
-        cancelEl.className     = 'btn btn-ghost';
+        confirmEl.textContent = config.confirmText || 'Aceptar';
+        confirmEl.className = `btn ${confirmClass}`;
+        cancelEl.textContent = config.cancelText || 'Cancelar';
+        cancelEl.className = 'btn btn-ghost';
         cancelEl.style.display = '';
 
-        const onConfirm = () => { _closeModal(); resolve(true);  };
-        const onCancel  = () => { _closeModal(); resolve(false); };
-
-        // Clonar para limpiar listeners anteriores
         const newConfirm = confirmEl.cloneNode(true);
         const newCancel  = cancelEl.cloneNode(true);
         confirmEl.replaceWith(newConfirm);
         cancelEl.replaceWith(newCancel);
-        document.getElementById('syncModalConfirm').addEventListener('click', onConfirm, { once: true });
-        document.getElementById('syncModalCancel').addEventListener('click', onCancel,  { once: true });
+        document.getElementById('syncModalConfirm')
+          .addEventListener('click', () => { _closeModal(); resolve(true);  }, { once: true });
+        document.getElementById('syncModalCancel')
+          .addEventListener('click', () => { _closeModal(); resolve(false); }, { once: true });
       }
 
       ov.style.display = 'flex';
@@ -258,20 +269,30 @@
 
   // ─────────────────────────────────────────
   //  CLOUD: LEER DESDE SUPABASE
+  //
+  //  Tiene timeout propio de PULL_TIMEOUT_MS (15 s).
+  //  Sin esto, un request colgado freezaría _loginSync()
+  //  indefinidamente sin ningún error visible en consola.
   // ─────────────────────────────────────────
   async function _pullFromCloud() {
     if (!_currentUser) return null;
-    try {
-      const { data, error } = await _sb
-        .from('finanzas')
-        .select('data, updated_at')
-        .eq('user_id', _currentUser.id)
-        .maybeSingle();
 
+    const pullPromise = _sb
+      .from('finanzas')
+      .select('data, updated_at')
+      .eq('user_id', _currentUser.id)
+      .maybeSingle();
+
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Pull timeout (15 s)')), PULL_TIMEOUT_MS)
+    );
+
+    try {
+      const { data, error } = await Promise.race([pullPromise, timeoutPromise]);
       if (error) { console.error('[sync] Pull error:', error.message); return null; }
       return data || null;
     } catch (e) {
-      console.error('[sync] Pull exception:', e);
+      console.error('[sync] Pull exception:', e.message);
       return null;
     }
   }
@@ -279,11 +300,8 @@
   // ─────────────────────────────────────────
   //  CLOUD: ESCRIBIR EN SUPABASE
   //
-  //  Usa { count: 'exact' } para detectar fallos silenciosos:
-  //  si RLS bloquea la escritura, Supabase devuelve count === 0
-  //  aunque no haya error explícito en la respuesta.
-  //  Esto evita el falso positivo de "✓ Sincronizado" cuando
-  //  en realidad no se guardó nada.
+  //  .select('user_id').single() detecta fallos silenciosos:
+  //  si RLS bloquea la escritura, PGRST116 lo expone.
   // ─────────────────────────────────────────
   async function _pushToCloud(payload) {
     if (!_currentUser) return false;
@@ -298,32 +316,28 @@
         },
         { onConflict: 'user_id' }
       )
-      .select('user_id')   // Hace que Supabase devuelva la fila afectada
-      .single();           // Si no hubo fila afectada, dispara error PGRST116
+      .select('user_id')
+      .single();
 
     const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Timeout de sincronización (20 s)')), PUSH_TIMEOUT_MS)
+      setTimeout(() => reject(new Error('Push timeout (20 s)')), PUSH_TIMEOUT_MS)
     );
 
     try {
       const { data, error } = await Promise.race([upsertPromise, timeoutPromise]);
 
       if (error) {
-        // PGRST116 = "no rows returned" → la escritura fue rechazada en silencio (RLS u otro)
         const isRejected = error.code === 'PGRST116' || error.message?.includes('no rows');
         console.error(
-          isRejected
-            ? '[sync] Push rechazado por Supabase (RLS o sin filas afectadas):'
-            : '[sync] Push error:',
+          isRejected ? '[sync] Push rechazado (RLS / sin filas):' : '[sync] Push error:',
           error.message
         );
         _setSyncIndicator('error');
         return false;
       }
 
-      // Doble check: si data viene vacío a pesar de no tener error, también es fallo
       if (!data) {
-        console.error('[sync] Push: Supabase no devolvió datos. Posible rechazo silencioso.');
+        console.error('[sync] Push: sin data de retorno. Posible rechazo silencioso.');
         _setSyncIndicator('error');
         return false;
       }
@@ -339,34 +353,37 @@
 
   // ─────────────────────────────────────────
   //  SINCRONIZACIÓN DE LOGIN
-  //
-  //  Compara cloud vs local como bloque único (macro).
-  //  Sin merge campo a campo ni mes a mes.
   // ─────────────────────────────────────────
   async function _loginSync() {
-    if (_loginSyncDone) return;
+    if (_loginSyncDone) { _log('_loginSync: ya ejecutado, saliendo'); return; }
     _loginSyncDone = true;
 
     if (!_currentUser) return;
 
+    _log('_loginSync: inicio');
     _setSyncIndicator('syncing');
 
     const localRaw  = localStorage.getItem(LS_KEY);
     const local     = localRaw ? _safeParse(localRaw) : null;
+
+    _log('_loginSync: tirando pull...');
     const cloudRow  = await _pullFromCloud();
     const cloudData = cloudRow?.data || null;
+    _log('_loginSync: pull ok. cloudData:', cloudData ? 'tiene datos' : 'vacío');
 
     const localEmpty = _isEmpty(local);
     const cloudEmpty = _isEmpty(cloudData);
 
     // ── Caso 1: nada en ningún lado ───────────────────────────────────────────
     if (localEmpty && cloudEmpty) {
+      _log('_loginSync: caso 1 — ambos vacíos');
       _setSyncIndicator('synced');
       return;
     }
 
     // ── Caso 2: solo hay datos en la nube → pull silencioso ───────────────────
     if (localEmpty && !cloudEmpty) {
+      _log('_loginSync: caso 2 — solo nube');
       localStorage.setItem(LS_KEY, JSON.stringify(cloudData));
       _reloadAppState();
       _setSyncIndicator('synced');
@@ -375,20 +392,23 @@
 
     // ── Caso 3: solo hay datos locales → push silencioso ─────────────────────
     if (!localEmpty && cloudEmpty) {
+      _log('_loginSync: caso 3 — solo local');
       const toUpload = { ...local, _syncedAt: new Date().toISOString() };
       localStorage.setItem(LS_KEY, JSON.stringify(toUpload));
       await _pushToCloud(toUpload);
       return;
     }
 
-    // ── Caso 4: ambos tienen datos pero son iguales → alinear metadatos ───────
+    // ── Caso 4: ambos iguales → alinear metadatos silenciosamente ─────────────
     if (_dataEqual(local, cloudData)) {
+      _log('_loginSync: caso 4 — iguales');
       localStorage.setItem(LS_KEY, JSON.stringify(cloudData));
       _setSyncIndicator('synced');
       return;
     }
 
-    // ── Caso 5: ambos tienen datos Y difieren → preguntar con modal ───────────
+    // ── Caso 5: ambos distintos → modal de conflicto ──────────────────────────
+    _log('_loginSync: caso 5 — conflicto, abriendo modal');
     const useCloud = await _modal({
       icon:         '☁',
       title:        'Tus datos no coinciden con la nube',
@@ -398,17 +418,15 @@
       cancelText:   'Mantener mis datos locales',
       confirmClass: 'btn-primary',
     });
+    _log('_loginSync: modal resuelto con', useCloud);
 
     if (useCloud) {
-      // Guardar copia de seguridad del local ANTES de pisarlo
       localStorage.setItem(LS_DRAFT_KEY, localRaw);
       _updateDraftBtn();
-
       localStorage.setItem(LS_KEY, JSON.stringify(cloudData));
       _reloadAppState();
       _setSyncIndicator('synced');
     } else {
-      // El usuario conserva el local → push inmediato a la nube
       const toUpload = { ...local, _syncedAt: new Date().toISOString() };
       localStorage.setItem(LS_KEY, JSON.stringify(toUpload));
       _setSyncIndicator('syncing');
@@ -418,18 +436,12 @@
 
   // ─────────────────────────────────────────
   //  RECUPERACIÓN DE BORRADOR
-  //
-  //  Si el push falla: aborta sin eliminar el borrador.
-  //  No hace window.location.reload(): usa _reloadAppState()
-  //  para evitar el bloqueo de Chrome cuando hay un modal
-  //  o popup pendiente al momento de la recarga.
   // ─────────────────────────────────────────
   async function recoverDraft() {
     const draftRaw = localStorage.getItem(LS_DRAFT_KEY);
     if (!draftRaw) {
       await _modal({
-        icon:    '📭',
-        title:   'Sin borrador disponible',
+        icon: '📭', title: 'Sin borrador disponible',
         message: 'No hay ningún borrador guardado para recuperar.',
         isAlert: true,
       });
@@ -437,22 +449,19 @@
     }
 
     const confirmed = await _modal({
-      icon:         '⚠',
-      title:        '¿Restaurar borrador local?',
-      message:      'Esto reemplazará los datos actuales (tanto locales como en la nube) con tu borrador guardado.',
-      detail:       'Esta acción no se puede deshacer.',
-      confirmText:  'Sí, restaurar mi borrador',
-      cancelText:   'Cancelar',
+      icon: '⚠', title: '¿Restaurar borrador local?',
+      message: 'Esto reemplazará los datos actuales (tanto locales como en la nube) con tu borrador guardado.',
+      detail: 'Esta acción no se puede deshacer.',
+      confirmText: 'Sí, restaurar mi borrador',
+      cancelText: 'Cancelar',
       confirmClass: 'btn-danger',
     });
-
     if (!confirmed) return;
 
     const draft = _safeParse(draftRaw);
     if (!draft) {
       await _modal({
-        icon:    '💔',
-        title:   'Borrador corrupto',
+        icon: '💔', title: 'Borrador corrupto',
         message: 'El borrador guardado no se puede leer. Fue eliminado para evitar problemas futuros.',
         isAlert: true,
       });
@@ -461,41 +470,32 @@
       return;
     }
 
-    // Pisar gm_v1 con el borrador
     const toRestore = { ...draft, _syncedAt: new Date().toISOString() };
     localStorage.setItem(LS_KEY, JSON.stringify(toRestore));
 
-    // Push a Supabase. Si falla: abortar sin eliminar el borrador.
     if (_currentUser) {
       _setSyncIndicator('syncing');
       const pushOk = await _pushToCloud(toRestore);
 
       if (!pushOk) {
-        // Restaurar el LS_KEY al estado original y avisar
-        // (el borrador permanece intacto para el próximo intento)
         await _modal({
-          icon:    '⚠',
-          title:   'No se pudo sincronizar',
-          message: 'Tu borrador se restauró localmente, pero no se pudo guardar en la nube por un error de red o de permisos.<br><br>Tus datos locales están seguros. Intentá de nuevo más tarde.',
-          detail:  'El botón "Recuperar borrador" seguirá disponible hasta que la sincronización sea exitosa.',
+          icon: '⚠', title: 'No se pudo sincronizar',
+          message: 'Tu borrador se restauró localmente, pero no se pudo guardar en la nube.<br><br>Tus datos locales están seguros. Intentá de nuevo más tarde.',
+          detail: 'El botón "Recuperar borrador" seguirá disponible hasta que la sincronización sea exitosa.',
           isAlert: true,
         });
-        // El borrador NO se elimina: el usuario puede volver a intentar
         _updateDraftBtn();
-        // Recargar la UI con los datos del borrador ya pisados en localStorage
         _reloadAppState();
         return;
       }
     }
 
-    // Push exitoso (o no había sesión): limpiar borrador y refrescar UI
     localStorage.removeItem(LS_DRAFT_KEY);
     _updateDraftBtn();
     _reloadAppState();
 
     await _modal({
-      icon:    '✅',
-      title:   'Borrador restaurado',
+      icon: '✅', title: 'Borrador restaurado',
       message: 'Tus datos fueron restaurados correctamente y guardados en la nube.',
       isAlert: true,
     });
@@ -503,9 +503,6 @@
 
   // ─────────────────────────────────────────
   //  NOTIFICACIÓN CON DEBOUNCE
-  //
-  //  Llamada desde script.js después de cada save().
-  //  Solo sube; nunca dispara el modal de conflicto.
   // ─────────────────────────────────────────
   function notifyChange() {
     if (!_currentUser) return;
@@ -514,17 +511,13 @@
     _debounceTimer = setTimeout(async () => {
       if (_isSyncing) return;
       _isSyncing = true;
-
       try {
         const localRaw = localStorage.getItem(LS_KEY);
         if (!localRaw) return;
-
         const local = _safeParse(localRaw);
         if (!local) return;
-
         local._syncedAt = new Date().toISOString();
         localStorage.setItem(LS_KEY, JSON.stringify(local));
-
         _setSyncIndicator('syncing');
         await _pushToCloud(local);
       } finally {
@@ -534,55 +527,57 @@
   }
 
   // ─────────────────────────────────────────
-  //  INICIALIZACIÓN DEL MÓDULO
+  //  INICIALIZACIÓN
   //
-  //  Problema raíz del bug de F5:
-  //  Supabase v2 puede disparar INITIAL_SESSION sincrónicamente
-  //  durante la construcción del script, antes de que el parser
-  //  termine el DOM. _modal() llama a getElementById('syncModal'),
-  //  no lo encuentra, cae al confirm() nativo, Chrome lo bloquea
-  //  en carga inicial, la Promise nunca resuelve y el indicador
-  //  queda colgado en "Sincronizando…" para siempre.
+  //  ORDEN CRÍTICO — no reordenar:
   //
-  //  Solución: toda la inicialización de Supabase vive dentro de
-  //  DOMContentLoaded. El listener de onAuthStateChange se registra
-  //  SOLO después de que el DOM está 100% listo, garantizando que
-  //  cualquier modal que se intente abrir encontrará su elemento.
+  //  1. Esperar DOMContentLoaded (el modal necesita el DOM).
+  //  2. createClient() — instanciar el SDK de Supabase.
+  //  3. onAuthStateChange() — registrar el listener de forma
+  //     SINCRÓNICA, en el mismo tick que createClient().
+  //     Esto garantiza que ningún evento (incluido INITIAL_SESSION,
+  //     que Supabase puede emitir sincrónicamente al leer el token
+  //     del localStorage) se pierda por falta de listener.
+  //  4. El resto del setup de UI.
   //
-  //  Eventos que disparan _loginSync():
-  //    · INITIAL_SESSION  → F5 / recarga con sesión activa
-  //    · SIGNED_IN        → login manual / redirect OAuth
-  //  Ignorados para _loginSync():
-  //    · TOKEN_REFRESHED  → cubierto por notifyChange() con debounce
-  //    · USER_UPDATED     → cambio de perfil, no implica conflicto de datos
+  //  Por qué esto resuelve el bug del F5:
+  //  En versiones anteriores, createClient() vivía fuera del guard
+  //  de DOMContentLoaded (top-level del IIFE). El SDK leía el token
+  //  del localStorage en ese momento y encolaba INITIAL_SESSION.
+  //  Cuando el listener finalmente se registraba (después de un
+  //  .then() asíncrono), el evento ya había sido despachado sin
+  //  receptor. Resultado: _loginSync() nunca se ejecutaba en F5.
   // ─────────────────────────────────────────
   function _init() {
-    // Helper: devuelve una Promise que resuelve cuando el DOM está listo.
-    // Si ya está listo (script cargado con defer o al final del body y
-    // DOMContentLoaded ya disparó), resuelve de inmediato en el mismo tick.
     function _domReady() {
       return new Promise(resolve => {
         if (document.readyState === 'loading') {
           document.addEventListener('DOMContentLoaded', resolve, { once: true });
         } else {
+          // DOM ya listo: resolver en la próxima microtask para no
+          // bloquear el hilo sincrónico actual del parser.
           resolve();
         }
       });
     }
 
-    // Toda la lógica de auth arranca DESPUÉS de que el DOM esté listo.
-    _domReady().then(async () => {
+    _domReady().then(() => {
+      _log('DOM listo');
 
-      // El DOM está disponible: podemos actualizar UI y abrir modales con seguridad.
-      _updateDraftBtn();
+      // ── PASO 2: Instanciar cliente ────────────────────────────────────────
+      _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+      // ── PASO 3: Registrar listener SINCRÓNICAMENTE ────────────────────────
+      // No hay await ni .then() entre createClient() y onAuthStateChange().
+      // Ambas llamadas ocurren en el mismo tick de JS, sin ceder el hilo.
+      // Cualquier evento que el SDK emita (incluido INITIAL_SESSION síncronico)
+      // encontrará el listener ya registrado.
       _sb.auth.onAuthStateChange(async (event, session) => {
+        _log('onAuthStateChange:', event, session?.user?.email ?? 'sin usuario');
         _currentUser = session?.user || null;
         _renderAuthUI(_currentUser);
 
         if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN') {
-          // _loginSyncDone evita que ambos eventos (emitidos casi en simultáneo
-          // por Supabase v2 en un redirect OAuth) abran el modal dos veces.
           if (_currentUser) {
             await _loginSync();
           } else {
@@ -595,6 +590,8 @@
         // TOKEN_REFRESHED y USER_UPDATED: ignorados intencionalmente.
       });
 
+      // ── PASO 4: Setup de UI inicial ───────────────────────────────────────
+      _updateDraftBtn();
     });
   }
 
