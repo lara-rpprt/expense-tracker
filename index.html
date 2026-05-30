@@ -29,6 +29,10 @@
   <div class="auth-area">
     <div id="authStatus" class="auth-status" style="display:none"></div>
     <span id="syncIndicator" class="sync-indicator" style="display:none"></span>
+    <button class="btn btn-danger btn-sm" id="draftRecoverBtn"
+            onclick="window.Sync?.recoverDraft()"
+            title="Recuperar borrador local guardado antes del último conflicto"
+            style="display:none">↩ Recuperar borrador</button>
     <button class="auth-btn" id="authBtn" onclick="window.Sync?.authToggle()">
       <span class="auth-btn-icon">G</span>Iniciar sesión
     </button>
@@ -412,6 +416,20 @@
       <button class="btn btn-ghost" onclick="clearRefDate()" title="Eliminar la fecha personalizada y volver al cálculo automático por día de hoy">↺ Restablecer a hoy</button>
       <button class="btn btn-ghost" onclick="closeRefDateModal()">Cancelar</button>
       <button class="btn btn-primary" onclick="saveRefDate()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ MODAL: SYNC (conflictos, alertas y confirmaciones) ═══════════ -->
+<div class="modal-ov" id="syncModal" style="display:none">
+  <div class="modal sync-modal">
+    <div class="sync-modal-icon" id="syncModalIcon"></div>
+    <div class="modal-title" id="syncModalTitle"></div>
+    <p class="sync-modal-message" id="syncModalMessage"></p>
+    <p class="sync-modal-detail" id="syncModalDetail" style="display:none"></p>
+    <div class="m-actions sync-modal-actions">
+      <button class="btn btn-ghost" id="syncModalCancel"></button>
+      <button class="btn btn-primary" id="syncModalConfirm"></button>
     </div>
   </div>
 </div>

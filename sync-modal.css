@@ -1,0 +1,84 @@
+/* ═══════════════════════════════════════════════════════════
+   SYNC MODAL — Diálogos de sincronización, conflictos y avisos
+   Pegar al final de styles.css
+   ═══════════════════════════════════════════════════════════ */
+
+/* El modal de sync hereda .modal-ov y .modal de los modales
+   existentes. Solo sobreescribimos lo que difiere. */
+
+   .sync-modal {
+    max-width: 400px;
+    text-align: center;
+    padding: 28px 28px 22px;
+    /* Animación de entrada */
+    animation: syncModalIn .18s ease-out both;
+  }
+  
+  @keyframes syncModalIn {
+    from { opacity: 0; transform: scale(.95) translateY(6px); }
+    to   { opacity: 1; transform: scale(1)  translateY(0);    }
+  }
+  
+  /* Ícono decorativo grande */
+  .sync-modal-icon {
+    font-size: 36px;
+    line-height: 1;
+    margin-bottom: 14px;
+    /* Evita que el emoji se seleccione al hacer doble clic */
+    user-select: none;
+  }
+  
+  /* Título: reutiliza .modal-title pero recentrado */
+  .sync-modal .modal-title {
+    text-align: center;
+    font-size: 15px;
+    margin-bottom: 10px;
+  }
+  
+  /* Mensaje principal */
+  .sync-modal-message {
+    font-size: 13px;
+    color: var(--label);
+    line-height: 1.55;
+    margin-bottom: 0;
+  }
+  
+  /* Detalle secundario (más pequeño, más apagado) */
+  .sync-modal-detail {
+    font-size: 11px;
+    color: var(--muted);
+    line-height: 1.5;
+    margin-top: 10px;
+    padding: 8px 10px;
+    background: var(--surface2);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+  }
+  
+  /* Área de botones: centrada y con más espacio arriba */
+  .sync-modal-actions {
+    margin-top: 22px;
+    justify-content: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  
+  /* Los botones del sync modal son un poco más anchos
+     para que el texto explícito quepa bien */
+  .sync-modal-actions .btn {
+    min-width: 160px;
+    justify-content: center;
+  }
+  
+  /* En móvil: apilar los botones verticalmente */
+  @media (max-width: 480px) {
+    .sync-modal {
+      padding: 22px 16px 18px;
+    }
+    .sync-modal-actions {
+      flex-direction: column;
+    }
+    .sync-modal-actions .btn {
+      width: 100%;
+    }
+  }
