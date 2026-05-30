@@ -60,16 +60,10 @@
 
     ind.textContent   = cfg.text;
     ind.style.color   = cfg.color;
+    // El indicador se muestra siempre que haya sesión activa y un estado con texto.
+    // Solo desaparece cuando el usuario cierra sesión (idle, sin _currentUser).
+    // No hay auto-ocultado por tiempo: el estado queda fijo hasta el próximo cambio.
     ind.style.display = (_currentUser && cfg.text) ? 'inline' : 'none';
-
-    // Auto-ocultar el indicador "Sincronizado" luego de 3 segundos
-    if (state === 'synced') {
-      setTimeout(() => {
-        if (ind.textContent === '✓ Sincronizado') {
-          ind.style.display = 'none';
-        }
-      }, 3000);
-    }
   }
 
   // ─────────────────────────────────────────
@@ -192,22 +186,35 @@
   // ─────────────────────────────────────────
   //  CLOUD: ESCRIBIR EN SUPABASE
   // ─────────────────────────────────────────
+  // _pushToCloud es ahora una función de red pura.
+  // NO gestiona _isSyncing: esa responsabilidad recae en _doSync y notifyChange,
+  // que son quienes conocen el contexto de cada llamada. Esto elimina la colisión
+  // de mutex que causaba el indicador congelado.
+  // Incluye un timeout de 20 s para evitar el bloqueo por red colgada.
   async function _pushToCloud(payload) {
-    if (!_currentUser || _isSyncing) return false;
-    _isSyncing = true;
-    _setSyncIndicator('syncing');
+    if (!_currentUser) return false;
+
+    const PUSH_TIMEOUT_MS = 20000;
+
+    // Promise.race: si la red tarda más de 20 s, el timeout rechaza primero
+    // y el catch actualiza el indicador a error, liberando el mutex en el caller.
+    const upsertPromise = _sb
+      .from('finanzas')
+      .upsert(
+        {
+          user_id:    _currentUser.id,
+          data:       payload,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'user_id' }
+      );
+
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Timeout de sincronización (20 s)')), PUSH_TIMEOUT_MS)
+    );
 
     try {
-      const { error } = await _sb
-        .from('finanzas')
-        .upsert(
-          {
-            user_id:    _currentUser.id,
-            data:       payload,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: 'user_id' }
-        );
+      const { error } = await Promise.race([upsertPromise, timeoutPromise]);
 
       if (error) {
         console.error('[sync] Push error:', error.message);
@@ -218,11 +225,9 @@
       _setSyncIndicator('synced');
       return true;
     } catch (e) {
-      console.error('[sync] Push exception:', e);
+      console.error('[sync] Push exception:', e.message);
       _setSyncIndicator('error');
       return false;
-    } finally {
-      _isSyncing = false;
     }
   }
 
@@ -268,51 +273,72 @@
   //  Lógica completa de decisión push/pull/merge.
   // ─────────────────────────────────────────
   async function _doSync() {
-    if (!_currentUser) return;
+    // Guarda de sesión y de concurrencia: si ya hay un sync activo, no apilamos otro.
+    // En JS single-thread, el check + set es atómico hasta el primer await, así que
+    // no hay ventana de race condition entre la verificación y la asignación.
+    if (!_currentUser || _isSyncing) return;
+    _isSyncing = true;
 
-    const localRaw  = localStorage.getItem(LS_KEY);
-    const local     = localRaw ? _safeParse(localRaw) : null;
-    const cloudRow  = await _pullFromCloud();
-    const cloudData = cloudRow?.data || null;
+    try {
+      const localRaw  = localStorage.getItem(LS_KEY);
+      const local     = localRaw ? _safeParse(localRaw) : null;
+      const cloudRow  = await _pullFromCloud();
+      const cloudData = cloudRow?.data || null;
 
-    // Caso 1: nada en ningún lado
-    if (!local && !cloudData) {
-      _setSyncIndicator('synced');
-      return;
-    }
+      // Caso 1: nada en ningún lado
+      if (!local && !cloudData) {
+        _setSyncIndicator('synced');
+        return;
+      }
 
-    // Caso 2: sin datos en la nube → subir todo lo local (primera sincronización)
-    if (!cloudData) {
-      const toUpload = { ...(local || {}), _syncedAt: new Date().toISOString() };
-      localStorage.setItem(LS_KEY, JSON.stringify(toUpload));
-      await _pushToCloud(toUpload);
-      return;
-    }
+      // Caso 2: sin datos en la nube → subir todo lo local (primera sincronización)
+      if (!cloudData) {
+        const toUpload = { ...(local || {}), _syncedAt: new Date().toISOString() };
+        localStorage.setItem(LS_KEY, JSON.stringify(toUpload));
+        _setSyncIndicator('syncing');
+        await _pushToCloud(toUpload);
+        return;
+      }
 
-    // Caso 3: sin datos locales → bajar de la nube
-    if (!local) {
-      localStorage.setItem(LS_KEY, JSON.stringify(cloudData));
-      _reloadAppState();
-      _setSyncIndicator('synced');
-      return;
-    }
+      // Caso 3: sin datos locales → bajar de la nube
+      if (!local) {
+        localStorage.setItem(LS_KEY, JSON.stringify(cloudData));
+        _reloadAppState();
+        _setSyncIndicator('synced');
+        return;
+      }
 
-    // Caso 4: ambos tienen datos → comparar timestamps
-    const localTs = local._syncedAt ? new Date(local._syncedAt).getTime() : 0;
-    const cloudTs = cloudData._syncedAt ? new Date(cloudData._syncedAt).getTime() : 0;
+      // Caso 4: ambos tienen datos → comparar timestamps con precisión estricta
+      const localTs = local._syncedAt ? new Date(local._syncedAt).getTime() : 0;
+      const cloudTs = cloudData._syncedAt ? new Date(cloudData._syncedAt).getTime() : 0;
 
-    if (cloudTs > localTs) {
-      // La nube es más nueva → pull + merge de meses locales exclusivos
-      const merged = _mergeStates(local, cloudData);
-      merged._syncedAt = cloudData._syncedAt;
-      localStorage.setItem(LS_KEY, JSON.stringify(merged));
-      _reloadAppState();
-      _setSyncIndicator('synced');
-    } else {
-      // Lo local es igual o más nuevo → push
-      // (cubre el caso de "primer login con datos históricos locales")
-      const toUpload = { ...local, _syncedAt: local._syncedAt || new Date().toISOString() };
-      await _pushToCloud(toUpload);
+      if (cloudTs > localTs) {
+        // La nube es más nueva → pull + merge de meses locales exclusivos
+        const merged = _mergeStates(local, cloudData);
+        merged._syncedAt = cloudData._syncedAt;
+        localStorage.setItem(LS_KEY, JSON.stringify(merged));
+        _reloadAppState();
+        _setSyncIndicator('synced');
+
+      } else if (localTs > cloudTs) {
+        // Lo local es más nuevo → push
+        // (cubre el primer login con datos históricos locales sin _syncedAt)
+        const toUpload = { ...local, _syncedAt: local._syncedAt || new Date().toISOString() };
+        _setSyncIndicator('syncing');
+        await _pushToCloud(toUpload);
+
+      } else {
+        // ── CORRECCIÓN CLAVE ──────────────────────────────────────────────────
+        // Timestamps iguales = ya estamos sincronizados. No hay nada que subir.
+        // El else original trataba este caso como "necesita push", disparando un
+        // upsert redundante que colisionaba con el mutex de notifyChange y dejaba
+        // el indicador congelado en 'syncing'. Ahora simplemente confirmamos sync.
+        _setSyncIndicator('synced');
+      }
+
+    } finally {
+      // El mutex se libera siempre, pase lo que pase (error, timeout, éxito).
+      _isSyncing = false;
     }
   }
 
@@ -342,16 +368,28 @@
 
     clearTimeout(_debounceTimer);
     _debounceTimer = setTimeout(async () => {
-      const localRaw = localStorage.getItem(LS_KEY);
-      if (!localRaw) return;
+      // Chequeo + set de mutex son sincrónicos hasta el primer await:
+      // ningún otro handler puede colarse entre estas dos líneas.
+      if (_isSyncing) return; // Un _doSync está en curso; los datos ya están frescos
+      _isSyncing = true;
 
-      const local = _safeParse(localRaw);
-      if (!local) return;
+      try {
+        const localRaw = localStorage.getItem(LS_KEY);
+        if (!localRaw) return;
 
-      // Actualizar timestamp antes de subir
-      local._syncedAt = new Date().toISOString();
-      localStorage.setItem(LS_KEY, JSON.stringify(local));
-      await _pushToCloud(local);
+        const local = _safeParse(localRaw);
+        if (!local) return;
+
+        // Sellar el timestamp y guardar antes de subir
+        local._syncedAt = new Date().toISOString();
+        localStorage.setItem(LS_KEY, JSON.stringify(local));
+
+        _setSyncIndicator('syncing');
+        await _pushToCloud(local);
+      } finally {
+        // Liberar el mutex siempre, incluso si _pushToCloud falló o hizo timeout
+        _isSyncing = false;
+      }
     }, DEBOUNCE_MS);
   }
 
