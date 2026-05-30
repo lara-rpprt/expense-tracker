@@ -6,6 +6,7 @@
   <title>Finanzas</title>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 </head>
 <body>
 
@@ -24,6 +25,13 @@
       ⬆ Importar
       <input type="file" accept=".json" onchange="importData(event)" style="display:none">
     </label>
+  </div>
+  <div class="auth-area">
+    <div id="authStatus" class="auth-status" style="display:none"></div>
+    <span id="syncIndicator" class="sync-indicator" style="display:none"></span>
+    <button class="auth-btn" id="authBtn" onclick="window.Sync?.authToggle()">
+      <span class="auth-btn-icon">G</span>Iniciar sesión
+    </button>
   </div>
 </header>
 
@@ -409,5 +417,6 @@
 </div>
 
 <script src="script.js"></script>
+<script src="sync.js"></script>
 </body>
 </html>

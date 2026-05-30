@@ -10,7 +10,11 @@ let _importPending = null; // { month, resolve }
 function load() {
   try { const s = localStorage.getItem('gm_v1'); if (s) S = JSON.parse(s); } catch(e) {}
 }
-function save() { localStorage.setItem('gm_v1', JSON.stringify(S)); }
+function save() {
+  localStorage.setItem('gm_v1', JSON.stringify(S));
+  // Notificar al módulo de sync (debounced 3s) si el usuario está logueado
+  window.Sync?.notifyChange();
+}
 function getM() { return S.months.find(m => m.id === S.activeId) || null; }
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
 
