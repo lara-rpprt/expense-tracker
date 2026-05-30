@@ -33,15 +33,9 @@
   let _debounceTimer = null;
   let _isSyncing     = false;
 
-  // Evita doble disparo de _loginSync() por SIGNED_IN + getSession()
-  // en el redirect OAuth de Supabase v2.
+  // Evita doble disparo de _loginSync() cuando Supabase v2 emite
+  // INITIAL_SESSION y SIGNED_IN casi simultáneamente en un redirect OAuth.
   let _loginSyncDone = false;
-
-  // Flag auxiliar: se setea true en cuanto onAuthStateChange dispara por primera
-  // vez (cualquier evento). Permite al fallback de _init() saber que el listener
-  // ya corrió aunque el usuario no esté logueado (_currentUser sería null en
-  // ambos casos: antes y después del evento).
-  let _listenerFired = false;
 
   // ─────────────────────────────────────────
   //  HELPERS GENERALES
@@ -542,88 +536,69 @@
   // ─────────────────────────────────────────
   //  INICIALIZACIÓN DEL MÓDULO
   //
-  //  Arquitectura de fuente única de verdad:
-  //  onAuthStateChange es el ÚNICO camino que llama a _loginSync().
-  //  getSession() ya NO llama a _loginSync() directamente; solo
-  //  actúa como fallback de UI para el caso extremo en que el
-  //  evento tarde más de INIT_TIMEOUT_MS en llegar (red muy lenta
-  //  o bloqueada). En ese caso renderiza la UI sin sync, y el
-  //  evento llegará cuando la red se recupere.
+  //  Problema raíz del bug de F5:
+  //  Supabase v2 puede disparar INITIAL_SESSION sincrónicamente
+  //  durante la construcción del script, antes de que el parser
+  //  termine el DOM. _modal() llama a getElementById('syncModal'),
+  //  no lo encuentra, cae al confirm() nativo, Chrome lo bloquea
+  //  en carga inicial, la Promise nunca resuelve y el indicador
+  //  queda colgado en "Sincronizando…" para siempre.
+  //
+  //  Solución: toda la inicialización de Supabase vive dentro de
+  //  DOMContentLoaded. El listener de onAuthStateChange se registra
+  //  SOLO después de que el DOM está 100% listo, garantizando que
+  //  cualquier modal que se intente abrir encontrará su elemento.
   //
   //  Eventos que disparan _loginSync():
-  //    · INITIAL_SESSION  → recarga de página (F5) con sesión activa
+  //    · INITIAL_SESSION  → F5 / recarga con sesión activa
   //    · SIGNED_IN        → login manual / redirect OAuth
-  //
-  //  Eventos ignorados para _loginSync():
-  //    · TOKEN_REFRESHED  → los pushes activos los cubre notifyChange()
+  //  Ignorados para _loginSync():
+  //    · TOKEN_REFRESHED  → cubierto por notifyChange() con debounce
   //    · USER_UPDATED     → cambio de perfil, no implica conflicto de datos
   // ─────────────────────────────────────────
-  (async function _init() {
-    _updateDraftBtn();
-
-    // ── Fuente única: onAuthStateChange maneja TODO ───────────────────────────
-    _sb.auth.onAuthStateChange(async (event, session) => {
-      _listenerFired = true;
-      _currentUser = session?.user || null;
-      _renderAuthUI(_currentUser);
-
-      if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN') {
-        // Ambos eventos pueden llegar al inicializar. _loginSyncDone garantiza
-        // que aunque los dos disparen casi simultáneamente (comportamiento normal
-        // de Supabase v2 en redirect OAuth), el modal solo aparece una vez.
-        if (_currentUser) {
-          await _loginSync();
+  function _init() {
+    // Helper: devuelve una Promise que resuelve cuando el DOM está listo.
+    // Si ya está listo (script cargado con defer o al final del body y
+    // DOMContentLoaded ya disparó), resuelve de inmediato en el mismo tick.
+    function _domReady() {
+      return new Promise(resolve => {
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', resolve, { once: true });
         } else {
-          // Sesión nula en INITIAL_SESSION = usuario no estaba logueado.
-          // Renderizar en estado deslogueado ya fue hecho en _renderAuthUI arriba.
+          resolve();
+        }
+      });
+    }
+
+    // Toda la lógica de auth arranca DESPUÉS de que el DOM esté listo.
+    _domReady().then(async () => {
+
+      // El DOM está disponible: podemos actualizar UI y abrir modales con seguridad.
+      _updateDraftBtn();
+
+      _sb.auth.onAuthStateChange(async (event, session) => {
+        _currentUser = session?.user || null;
+        _renderAuthUI(_currentUser);
+
+        if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN') {
+          // _loginSyncDone evita que ambos eventos (emitidos casi en simultáneo
+          // por Supabase v2 en un redirect OAuth) abran el modal dos veces.
+          if (_currentUser) {
+            await _loginSync();
+          } else {
+            _setSyncIndicator('idle');
+          }
+        } else if (event === 'SIGNED_OUT') {
+          _loginSyncDone = false;
           _setSyncIndicator('idle');
         }
-      } else if (event === 'SIGNED_OUT') {
-        _loginSyncDone = false;
-        _setSyncIndicator('idle');
-      }
-      // TOKEN_REFRESHED y USER_UPDATED: ignorados intencionalmente.
+        // TOKEN_REFRESHED y USER_UPDATED: ignorados intencionalmente.
+      });
+
     });
+  }
 
-    // ── Fallback de UI: solo para mostrar estado inicial mientras llega el evento
-    //
-    //  onAuthStateChange en Supabase v2 dispara INITIAL_SESSION de forma
-    //  asíncrona pero casi inmediata (< 50 ms en condiciones normales).
-    //  Este fallback solo entra si el evento tarda más de INIT_TIMEOUT_MS,
-    //  lo que indicaría un problema de red. En ese caso mostramos la UI
-    //  en el estado que podamos determinar localmente, sin bloquear la app.
-    //  _loginSync() NO se llama desde acá: se llamará cuando llegue el evento.
-    // ─────────────────────────────────────────────────────────────────────────
-    const INIT_TIMEOUT_MS = 1500;
-    await Promise.race([
-      // Esperar a que el listener de arriba haya seteado _currentUser
-      new Promise(resolve => {
-        const check = setInterval(() => {
-          if (_listenerFired) {
-            clearInterval(check);
-            resolve();
-          }
-        }, 30);
-      }),
-      // Timeout de seguridad
-      new Promise(resolve => setTimeout(resolve, INIT_TIMEOUT_MS)),
-    ]);
-
-    // Si después del timeout el listener todavía no corrió (red muy lenta),
-    // hacer getSession() solo para renderizar la UI sin bloquear.
-    if (!_listenerFired) {
-      const { data: { session } } = await _sb.auth.getSession();
-      const fallbackUser = session?.user || null;
-      if (fallbackUser && !_currentUser) {
-        // El listener aún no llegó pero tenemos sesión local válida:
-        // actualizar UI para que no se vea deslogueado. El sync llegará
-        // cuando onAuthStateChange finalmente dispare.
-        _currentUser = fallbackUser;
-        _renderAuthUI(_currentUser);
-        _setSyncIndicator('syncing'); // Indicar que sync está pendiente
-      }
-    }
-  })();
+  _init();
 
   // ─────────────────────────────────────────
   //  API PÚBLICA
