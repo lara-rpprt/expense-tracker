@@ -18,13 +18,18 @@
       <option value="">— Seleccioná un mes —</option>
     </select>
   </div>
-  <div class="h-actions">
-    <button class="btn btn-primary" onclick="openNewMonthModal()">+ Nuevo mes</button>
-    <button class="btn btn-ghost" onclick="openExportModal()" title="Exportar datos">⬇ Exportar</button>
+  <div class="h-actions" id="hActions">
+    <button class="btn btn-primary" onclick="openNewMonthModal();closeHMenu()">+ Nuevo mes</button>
+    <button class="btn btn-ghost" onclick="openExportModal();closeHMenu()" title="Exportar datos">⬇ Exportar</button>
     <label class="btn btn-ghost" title="Importar JSON" style="cursor:pointer">
       ⬆ Importar
       <input type="file" accept=".json" onchange="importData(event)" style="display:none">
     </label>
+    <div class="h-draft-actions" id="draftActions" style="display:none">
+      <button class="btn btn-danger btn-sm" id="draftRecoverBtn2"
+              onclick="window.Sync?.recoverDraft();closeHMenu()"
+              title="Recuperar borrador local guardado antes del último conflicto">↩ Recuperar borrador</button>
+    </div>
   </div>
   <div class="auth-area">
     <div id="authStatus" class="auth-status" style="display:none"></div>
@@ -36,28 +41,46 @@
     <button class="auth-btn" id="authBtn" onclick="window.Sync?.authToggle()">
       <span class="auth-btn-icon">G</span>Iniciar sesión
     </button>
+    <!-- Hamburger: only visible on mobile -->
+    <button class="btn-hamburger" id="btnHamburger" onclick="toggleHMenu()" aria-label="Menú" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
   </div>
 </header>
+<!-- Mobile dropdown menu -->
+<div class="hmenu-dropdown" id="hmenuDropdown" style="display:none">
+  <button class="hmenu-item btn-primary-ghost" onclick="openNewMonthModal();closeHMenu()">+ Nuevo mes</button>
+  <button class="hmenu-item" onclick="openExportModal();closeHMenu()">⬇ Exportar</button>
+  <label class="hmenu-item" style="cursor:pointer">
+    ⬆ Importar
+    <input type="file" accept=".json" onchange="importData(event);closeHMenu()" style="display:none">
+  </label>
+  <div id="hmenuDraftRecover" style="display:none">
+    <button class="hmenu-item hmenu-danger" onclick="window.Sync?.recoverDraft();closeHMenu()">↩ Recuperar borrador</button>
+  </div>
+</div>
 
 <!-- ═══════════ CONFIG BAR ═══════════ -->
 <div class="cfg-bar" id="cfgBar" style="display:none">
-  <div class="cfg-field">
-    <span class="cfg-lbl">Nombre</span>
-    <input type="text" class="cfg-in" id="cfgName" placeholder="Ej: Junio 2026" oninput="updateCfg('name',this.value)">
+  <div class="cfg-scroll">
+    <div class="cfg-field">
+      <span class="cfg-lbl">Nombre</span>
+      <input type="text" class="cfg-in" id="cfgName" placeholder="Ej: Junio 2026" oninput="updateCfg('name',this.value)">
+    </div>
+    <div class="cfg-field">
+      <span class="cfg-lbl">Inicio</span>
+      <input type="date" class="cfg-in" id="cfgStart" onchange="updateCfg('startDate',this.value)">
+    </div>
+    <div class="cfg-field">
+      <span class="cfg-lbl">Fin</span>
+      <input type="date" class="cfg-in" id="cfgEnd" onchange="updateCfg('endDate',this.value)">
+    </div>
+    <div class="cfg-field">
+      <span class="cfg-lbl">USD → ARS</span>
+      <input type="number" class="cfg-in" id="cfgUSD" placeholder="Tipo de cambio" oninput="updateCfg('usdRate',parseFloat(this.value)||0)">
+    </div>
+    <button class="btn btn-danger btn-sm cfg-del" onclick="deleteMonth()" title="Eliminar este mes">🗑 Eliminar mes</button>
   </div>
-  <div class="cfg-field">
-    <span class="cfg-lbl">Inicio</span>
-    <input type="date" class="cfg-in" id="cfgStart" onchange="updateCfg('startDate',this.value)">
-  </div>
-  <div class="cfg-field">
-    <span class="cfg-lbl">Fin</span>
-    <input type="date" class="cfg-in" id="cfgEnd" onchange="updateCfg('endDate',this.value)">
-  </div>
-  <div class="cfg-field">
-    <span class="cfg-lbl">USD → ARS</span>
-    <input type="number" class="cfg-in" id="cfgUSD" placeholder="Tipo de cambio" oninput="updateCfg('usdRate',parseFloat(this.value)||0)">
-  </div>
-  <button class="btn btn-danger btn-sm cfg-del" onclick="deleteMonth()" title="Eliminar este mes">🗑 Eliminar mes</button>
 </div>
 
 <!-- ═══════════ CONTENT ═══════════ -->
@@ -79,100 +102,119 @@
 
       <!-- Ingresos -->
       <div class="card">
-        <div class="card-title">Ingresos del mes</div>
-        <div class="frow">
-          <label>Salario mes corriente</label>
-          <input type="number" id="incCurr" placeholder="0" oninput="updateInc('salaryCurrentMonth',this.value)">
+        <div class="card-title card-title--collapsible" onclick="toggleCard(this)">
+          <span>Ingresos del mes</span>
+          <span class="card-chevron">▾</span>
         </div>
-        <div class="frow">
-          <label>Salario mes vencido</label>
-          <input type="number" id="incPrev" placeholder="0" oninput="updateInc('salaryPreviousMonth',this.value)">
-        </div>
-        <!-- Aumento info row -->
-        <div class="salary-diff-row" id="salaryDiffRow" style="display:none">
-          <span class="diff-lbl">Aumento</span>
-          <div class="diff-vals">
-            <span class="diff-ars" id="diffARS"></span>
-            <span class="diff-pct" id="diffPCT"></span>
+        <div class="card-body">
+          <div class="frow">
+            <label>Salario mes corriente</label>
+            <input type="number" id="incCurr" placeholder="0" oninput="updateInc('salaryCurrentMonth',this.value)">
           </div>
-        </div>
-        <!-- USD info row -->
-        <div class="salary-usd-row" id="salaryUSDRow" style="display:none">
-          <span class="diff-lbl">Salario en USD</span>
-          <span class="diff-usd" id="salaryUSDVal"></span>
-        </div>
-        <div class="frow">
-          <label>Restante mes anterior</label>
-          <input type="number" id="incLeft" placeholder="0" oninput="updateInc('previousMonthLeftover',this.value)">
-        </div>
-        <div class="total-row">
-          <span class="total-lbl">Total disponible</span>
-          <span class="total-val" id="totalIncome">$0</span>
+          <div class="frow">
+            <label>Salario mes vencido</label>
+            <input type="number" id="incPrev" placeholder="0" oninput="updateInc('salaryPreviousMonth',this.value)">
+          </div>
+          <!-- Aumento info row -->
+          <div class="salary-diff-row" id="salaryDiffRow" style="display:none">
+            <span class="diff-lbl">Aumento</span>
+            <div class="diff-vals">
+              <span class="diff-ars" id="diffARS"></span>
+              <span class="diff-pct" id="diffPCT"></span>
+            </div>
+          </div>
+          <!-- USD info row -->
+          <div class="salary-usd-row" id="salaryUSDRow" style="display:none">
+            <span class="diff-lbl">Salario en USD</span>
+            <span class="diff-usd" id="salaryUSDVal"></span>
+          </div>
+          <div class="frow">
+            <label>Restante mes anterior</label>
+            <input type="number" id="incLeft" placeholder="0" oninput="updateInc('previousMonthLeftover',this.value)">
+          </div>
+          <div class="total-row">
+            <span class="total-lbl">Total disponible</span>
+            <span class="total-val" id="totalIncome">$0</span>
+          </div>
         </div>
       </div>
 
       <!-- Balance -->
       <div class="card">
-        <div class="card-title">
-          Balance actual
-          <label class="tog-wrap">
-            <div class="tog"><input type="checkbox" id="togSav" onchange="updateBal('includeSavings',this.checked)"><span class="tog-sl"></span></div>
-            <span class="tog-lbl">Incluir ahorros</span>
-          </label>
+        <div class="card-title card-title--collapsible" onclick="toggleCard(this)">
+          <span>Balance actual</span>
+          <span class="card-chevron">▾</span>
         </div>
-        <div class="frow"><label>Dinero en cuenta</label><input type="number" id="balAcc" placeholder="0" oninput="updateBal('account',this.value)"></div>
-        <div class="frow"><label>Efectivo</label><input type="number" id="balCash" placeholder="0" oninput="updateBal('cash',this.value)"></div>
-        <div class="frow"><label>Fondo de inversión</label><input type="number" id="balFund" placeholder="0" oninput="updateBal('fund',this.value)"></div>
-        <div class="frow"><label>Ahorros</label><input type="number" id="balSav" placeholder="0" oninput="updateBal('savings',this.value)"></div>
-        <div class="total-row">
-          <span class="total-lbl">Total en mano</span>
-          <span class="total-val" id="totalBal">$0</span>
+        <div class="card-body">
+          <div class="frow"><label>Dinero en cuenta</label><input type="number" id="balAcc" placeholder="0" oninput="updateBal('account',this.value)"></div>
+          <div class="frow"><label>Efectivo</label><input type="number" id="balCash" placeholder="0" oninput="updateBal('cash',this.value)"></div>
+          <div class="frow"><label>Fondo de inversión</label><input type="number" id="balFund" placeholder="0" oninput="updateBal('fund',this.value)"></div>
+          <div class="frow"><label>Ahorros</label><input type="number" id="balSav" placeholder="0" oninput="updateBal('savings',this.value)"></div>
+          <div class="bal-toggles">
+            <label class="tog-wrap">
+              <div class="tog"><input type="checkbox" id="togSav" onchange="updateBal('includeSavings',this.checked)"><span class="tog-sl"></span></div>
+              <span class="tog-lbl">Incluir ahorros</span>
+            </label>
+          </div>
+          <div class="total-row">
+            <span class="total-lbl">Total en mano</span>
+            <span class="total-val" id="totalBal">$0</span>
+          </div>
         </div>
       </div>
 
       <!-- Resumen -->
       <div class="card">
-        <div class="card-title">Resumen</div>
-        <div class="metric-grid" style="margin-bottom:12px">
-          <div class="metric">
-            <div class="metric-lbl">Gastos previstos</div>
-            <div class="metric-val acc" id="mPlanned">$0</div>
-          </div>
-          <div class="metric">
-            <div class="metric-lbl">Pagado</div>
-            <div class="metric-val neu" id="mPaid">$0</div>
-          </div>
-          <div class="metric">
-            <div class="metric-lbl">Por pagar</div>
-            <div class="metric-val neu" id="mRemaining">$0</div>
-          </div>
-          <div class="metric">
-            <div class="metric-lbl">Días del mes</div>
-            <div class="metric-val neu" id="mDaysTotal">—</div>
-          </div>
-          <div class="metric">
-            <div class="metric-lbl">Disp. por día teórico</div>
-            <div class="metric-val" id="mTheoDay">$0</div>
-          </div>
-          <div class="metric">
-            <div class="metric-lbl">Días restantes</div>
-            <div class="metric-val neu" id="mDaysLeft">—</div>
-            <div id="mRefDate" onclick="openRefDateModal()" style="font-size:10px;color:var(--muted);margin-top:3px;cursor:pointer;text-decoration:underline dotted"></div>
-          </div>
+        <div class="card-title card-title--collapsible" onclick="toggleCard(this)">
+          <span>Resumen</span>
+          <span class="card-chevron">▾</span>
         </div>
-        <div class="big-metric">
-          <span class="big-lbl">Disponible mensual restante</span>
-          <span class="big-val" id="mMonthlyAvail">$0</span>
-        </div>
-        <div class="big-metric">
-          <span class="big-lbl">Disponible por día (real)</span>
-          <span class="big-val" id="mRealDay" style="color:var(--accent)">$0</span>
+        <div class="card-body">
+          <div class="metric-grid" style="margin-bottom:12px">
+            <div class="metric">
+              <div class="metric-lbl">Gastos previstos</div>
+              <div class="metric-val acc" id="mPlanned">$0</div>
+            </div>
+            <div class="metric">
+              <div class="metric-lbl">Pagado</div>
+              <div class="metric-val neu" id="mPaid">$0</div>
+            </div>
+            <div class="metric">
+              <div class="metric-lbl">Por pagar</div>
+              <div class="metric-val neu" id="mRemaining">$0</div>
+            </div>
+            <div class="metric">
+              <div class="metric-lbl">Días del mes</div>
+              <div class="metric-val neu" id="mDaysTotal">—</div>
+            </div>
+            <div class="metric">
+              <div class="metric-lbl">Disp. por día teórico</div>
+              <div class="metric-val" id="mTheoDay">$0</div>
+            </div>
+            <div class="metric">
+              <div class="metric-lbl">Días restantes</div>
+              <div class="metric-val neu" id="mDaysLeft">—</div>
+              <div id="mRefDate" onclick="openRefDateModal()" style="font-size:10px;color:var(--muted);margin-top:3px;cursor:pointer;text-decoration:underline dotted"></div>
+            </div>
+          </div>
+          <div class="big-metric">
+            <span class="big-lbl">Disponible mensual restante</span>
+            <span class="big-val" id="mMonthlyAvail">$0</span>
+          </div>
+          <div class="big-metric">
+            <span class="big-lbl">Disponible por día (real)</span>
+            <span class="big-val" id="mRealDay" style="color:var(--accent)">$0</span>
+          </div>
         </div>
       </div>
 
       <!-- Calculadora rescate -->
       <div class="card">
-        <div class="card-title">Calculadora de rescate</div>
+        <div class="card-title card-title--collapsible" onclick="toggleCard(this)">
+          <span>Calculadora de rescate</span>
+          <span class="card-chevron">▾</span>
+        </div>
+        <div class="card-body">
         <p style="font-size:12px; color:var(--muted); margin-bottom:10px">¿Cuánto rescatar del fondo entre dos fechas?</p>
         <div class="resc-inputs">
           <input type="date" id="rescFrom" onchange="calcRescatar()">
@@ -207,7 +249,8 @@
           </div>
           <div class="resc-sub" id="rescPerDay"></div>
         </div>
-      </div>
+        </div><!-- /card-body -->
+      </div><!-- /card -->
 
     </div><!-- /left -->
 

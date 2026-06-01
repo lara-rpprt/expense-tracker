@@ -74,6 +74,7 @@ input.cfg-in[type="text"] { width: 170px; }
 .frow input:hover { border-color: var(--border); }
 .frow input:focus { outline: none; border-color: var(--accent); }
 .total-row { display: flex; justify-content: space-between; align-items: center; padding-top: 8px; margin-top: 4px; border-top: 1px solid var(--border); }
+.bal-toggles { display: flex; gap: 14px; flex-wrap: wrap; padding: 8px 0 4px; border-bottom: 1px solid rgba(48,54,61,.5); }
 .total-lbl { font-size: 11px; font-weight: 600; color: var(--label); text-transform: uppercase; letter-spacing: .5px; }
 .total-val { font-family: 'DM Mono', monospace; font-size: 15px; font-weight: 600; color: var(--accent); }
 
@@ -377,4 +378,180 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(.45); }
     border-left: none;
     padding-left: 0;
   }
+}
+/* ════════════════════════════════════════════════════
+   COLLAPSIBLE CARDS
+   ════════════════════════════════════════════════════ */
+
+.card-title--collapsible {
+  cursor: pointer;
+  user-select: none;
+  transition: color .15s;
+}
+.card-title--collapsible:hover {
+  color: var(--text);
+}
+.card-chevron {
+  font-size: 11px;
+  color: var(--muted);
+  transition: transform .2s ease;
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+
+.card-body {
+  overflow: hidden;
+  transition: opacity .18s ease;
+}
+
+.card--collapsed .card-body {
+  display: none;
+}
+
+/* ════════════════════════════════════════════════════
+   HAMBURGER BUTTON (mobile only)
+   ════════════════════════════════════════════════════ */
+
+.btn-hamburger {
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+  width: 34px;
+  height: 34px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  padding: 6px;
+  flex-shrink: 0;
+  transition: border-color .15s;
+}
+.btn-hamburger:hover { border-color: var(--muted); }
+.btn-hamburger span {
+  display: block;
+  width: 16px;
+  height: 1.5px;
+  background: var(--muted);
+  border-radius: 2px;
+  transition: transform .2s, opacity .2s;
+  transform-origin: center;
+}
+.btn-hamburger.is-open span:nth-child(1) { transform: translateY(5.5px) rotate(45deg); }
+.btn-hamburger.is-open span:nth-child(2) { opacity: 0; }
+.btn-hamburger.is-open span:nth-child(3) { transform: translateY(-5.5px) rotate(-45deg); }
+
+/* ════════════════════════════════════════════════════
+   HAMBURGER DROPDOWN MENU
+   ════════════════════════════════════════════════════ */
+
+.hmenu-dropdown {
+  position: fixed;
+  top: 54px; /* header height */
+  right: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0,0,0,.4);
+  z-index: 150;
+  min-width: 200px;
+  overflow: hidden;
+  animation: hmenuIn .15s ease-out both;
+}
+@keyframes hmenuIn {
+  from { opacity: 0; transform: translateY(-6px) scale(.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.hmenu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 11px 16px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background .12s;
+}
+.hmenu-item:last-child { border-bottom: none; }
+.hmenu-item:hover { background: var(--surface2); }
+.hmenu-item.btn-primary-ghost { color: var(--accent); }
+.hmenu-item.hmenu-danger { color: var(--red); }
+
+/* ════════════════════════════════════════════════════
+   CONFIG BAR — scrollable on mobile
+   ════════════════════════════════════════════════════ */
+
+.cfg-scroll {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+/* ════════════════════════════════════════════════════
+   RESPONSIVE — Mobile-first overrides
+   ════════════════════════════════════════════════════ */
+
+/* ── 820px: stack layout ── */
+@media (max-width: 820px) {
+  /* Layout */
+  #content { flex-direction: column; }
+  .main-wrap { flex-direction: column; overflow: visible; }
+  .left { width: 100%; border-right: none; border-bottom: 1px solid var(--border); overflow-y: visible; }
+  .right { overflow-y: visible; }
+
+  /* Header */
+  .h-actions { display: none; } /* hidden on mobile, replaced by hamburger */
+  .btn-hamburger { display: flex; }
+
+  /* Config bar */
+  .cfg-bar { padding: 8px 14px; }
+  .cfg-scroll { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; }
+  .cfg-scroll::-webkit-scrollbar { height: 0; }
+  .cfg-del { margin-left: 0; flex-shrink: 0; }
+  input.cfg-in[type="text"] { width: 140px; }
+  input.cfg-in[type="date"] { width: 120px; }
+  input.cfg-in[type="number"] { width: 90px; }
+
+  /* Payments row: stack controls */
+  .p-controls { flex-direction: column; align-items: flex-end; }
+  .p-date-in { width: 110px; }
+  .p-amt-in  { width: 90px; }
+
+  /* Expense table: hide date column on very small */
+  .etable th:nth-child(3),
+  .etable td:nth-child(3) { display: none; }
+}
+
+/* ── 600px: tighter adjustments ── */
+@media (max-width: 600px) {
+  header { padding: 8px 12px; gap: 8px; }
+  .logo { font-size: 15px; }
+  select.month-sel { min-width: 0; font-size: 13px; }
+  .cfg-bar { padding: 6px 12px; }
+  .left { padding: 12px; }
+  .right { padding: 12px; }
+  .card { padding: 12px; }
+  .metric-grid { grid-template-columns: 1fr 1fr; gap: 6px; }
+  .metric { padding: 8px; }
+  .metric-val { font-size: 13px; }
+  .big-val { font-size: 15px; }
+  .resc-inputs { flex-wrap: wrap; }
+  .resc-inputs input[type="date"] { min-width: 0; }
+}
+
+/* ── 420px: single-column tbar, hide sort toggle ── */
+@media (max-width: 420px) {
+  .tbar { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .tbar > div { width: 100%; justify-content: space-between; }
+  .hmenu-dropdown { right: 8px; left: 8px; min-width: 0; }
+  select.month-sel { font-size: 12px; }
+  .auth-name { display: none; }
 }

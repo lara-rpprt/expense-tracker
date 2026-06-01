@@ -235,9 +235,9 @@ function refreshCalcs() {
     diffRow.style.display = 'none';
   }
 
-  // Salary in USD
+  // Salary in USD — only show if usdRate is explicitly set AND > 0
   const usdRow = document.getElementById('salaryUSDRow');
-  if (curr > 0 && rate > 0) {
+  if (curr > 0 && rate > 1) {
     document.getElementById('salaryUSDVal').textContent = 'USD ' + (curr / rate).toFixed(2);
     usdRow.style.display = '';
   } else {
@@ -1074,6 +1074,48 @@ document.addEventListener('keydown', e => {
   }
   if (e.key === 'Enter' && document.getElementById('partialModal').style.display !== 'none') {
     if (document.activeElement.tagName !== 'BUTTON') addPartialPayment();
+  }
+});
+
+// ═══════════════════════════════════════
+//  COLLAPSIBLE CARDS
+// ═══════════════════════════════════════
+function toggleCard(titleEl) {
+  const card = titleEl.closest('.card');
+  const body = card.querySelector('.card-body');
+  const chevron = titleEl.querySelector('.card-chevron');
+  if (!body) return;
+  const isCollapsed = card.classList.toggle('card--collapsed');
+  if (chevron) chevron.style.transform = isCollapsed ? 'rotate(-90deg)' : '';
+}
+
+// ═══════════════════════════════════════
+//  HAMBURGER MENU (mobile)
+// ═══════════════════════════════════════
+function toggleHMenu() {
+  const dropdown = document.getElementById('hmenuDropdown');
+  const btn      = document.getElementById('btnHamburger');
+  if (!dropdown) return;
+  const isOpen = dropdown.style.display !== 'none';
+  dropdown.style.display = isOpen ? 'none' : 'block';
+  if (btn) btn.setAttribute('aria-expanded', String(!isOpen));
+  btn.classList.toggle('is-open', !isOpen);
+}
+
+function closeHMenu() {
+  const dropdown = document.getElementById('hmenuDropdown');
+  const btn      = document.getElementById('btnHamburger');
+  if (dropdown) dropdown.style.display = 'none';
+  if (btn) { btn.setAttribute('aria-expanded','false'); btn.classList.remove('is-open'); }
+}
+
+// Close hamburger menu when clicking outside
+document.addEventListener('click', e => {
+  const dropdown = document.getElementById('hmenuDropdown');
+  const btn      = document.getElementById('btnHamburger');
+  if (!dropdown || dropdown.style.display === 'none') return;
+  if (!dropdown.contains(e.target) && e.target !== btn && !btn?.contains(e.target)) {
+    closeHMenu();
   }
 });
 
