@@ -373,12 +373,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(.45); }
   }
 }
 
-@media (max-width: 560px) {
-  .auth-area {
-    border-left: none;
-    padding-left: 0;
-  }
-}
+
 /* ════════════════════════════════════════════════════
    COLLAPSIBLE CARDS
    ════════════════════════════════════════════════════ */
@@ -530,16 +525,33 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(.45); }
   .etable td:nth-child(3) { display: none; }
 }
 
-/* ── 600px: tighter adjustments ── */
+/* ── 600px: header 2 filas + config bar multi-fila ── */
 @media (max-width: 600px) {
-  header { padding: 8px 12px; gap: 8px; }
-  .logo { font-size: 15px; }
-  select.month-sel { min-width: 0; font-size: 13px; }
-  .cfg-bar { padding: 6px 12px; }
+  /* Header → 2 filas */
+  header { flex-wrap: wrap; padding: 8px 12px; gap: 8px 10px; }
+  .logo { font-size: 15px; flex: 1; }           /* fila 1: logo + auth-area */
+  .month-wrap { order: 3; flex: 0 0 100%; }      /* fila 2: selector ancho completo */
+  select.month-sel { width: 100%; max-width: none; min-width: 0; font-size: 13px; }
+  /* Borrador ya está en el hamburger — ocultar botón inline del header */
+  #draftRecoverBtn { display: none !important; }
+  .auth-area { border-left: none; padding-left: 0; }
+
+  /* Config bar → 3 filas lógicas */
+  .cfg-bar { padding: 8px 12px; }
+  .cfg-scroll { flex-wrap: wrap; overflow-x: hidden; gap: 8px; padding-bottom: 0; }
+  .cfg-field { flex: 0 0 calc(50% - 4px); flex-direction: column; align-items: flex-start; gap: 2px; }
+  .cfg-field:first-child { flex: 0 0 100%; }   /* Nombre: fila completa */
+  .cfg-lbl { font-size: 10px; }
+  input.cfg-in[type="text"] { width: 100%; min-width: 0; }
+  input.cfg-in[type="date"] { width: 100%; min-width: 0; }
+  input.cfg-in[type="number"] { width: 90px; }
+  .cfg-del { flex: 0 0 auto; align-self: flex-end; margin-left: auto; }
+
+  /* Otros ajustes */
   .left { padding: 12px; }
   .right { padding: 12px; }
   .card { padding: 12px; }
-  .metric-grid { grid-template-columns: 1fr 1fr; gap: 6px; }
+  .metric-grid { gap: 6px; }
   .metric { padding: 8px; }
   .metric-val { font-size: 13px; }
   .big-val { font-size: 15px; }
