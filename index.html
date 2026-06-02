@@ -6,6 +6,7 @@
   <title>Finanzas</title>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="sync-modal.css">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 </head>
 <body>
@@ -25,11 +26,6 @@
       ⬆ Importar
       <input type="file" accept=".json" onchange="importData(event)" style="display:none">
     </label>
-    <div class="h-draft-actions" id="draftActions" style="display:none">
-      <button class="btn btn-danger btn-sm" id="draftRecoverBtn2"
-              onclick="window.Sync?.recoverDraft();closeHMenu()"
-              title="Recuperar borrador local guardado antes del último conflicto">↩ Recuperar borrador</button>
-    </div>
   </div>
   <div class="auth-area">
     <div id="authStatus" class="auth-status" style="display:none"></div>
@@ -38,6 +34,10 @@
             onclick="window.Sync?.recoverDraft()"
             title="Recuperar borrador local guardado antes del último conflicto"
             style="display:none">↩ Recuperar borrador</button>
+    <button class="btn btn-ghost btn-sm" id="draftDiscardBtn"
+            onclick="window.Sync?.discardDraft()"
+            title="Descartar el borrador guardado"
+            style="display:none">✕ Descartar borrador</button>
     <button class="auth-btn" id="authBtn" onclick="window.Sync?.authToggle()">
       <span class="auth-btn-icon">G</span>Iniciar sesión
     </button>
@@ -57,6 +57,7 @@
   </label>
   <div id="hmenuDraftRecover" style="display:none">
     <button class="hmenu-item hmenu-danger" onclick="window.Sync?.recoverDraft();closeHMenu()">↩ Recuperar borrador</button>
+    <button class="hmenu-item" onclick="window.Sync?.discardDraft();closeHMenu()">✕ Descartar borrador</button>
   </div>
 </div>
 
@@ -69,11 +70,17 @@
     </div>
     <div class="cfg-field">
       <span class="cfg-lbl">Inicio</span>
-      <input type="date" class="cfg-in" id="cfgStart" onchange="updateCfg('startDate',this.value)">
+      <input type="text" class="cfg-in" id="cfgStart" placeholder="dd/mm/aaaa" readonly
+        style="cursor:pointer"
+        onchange="updateCfg('startDate',this.value)"
+        onclick="DateRangePicker.open({startId:'cfgStart',endId:'cfgEnd',anchor:this,which:'start'})">
     </div>
     <div class="cfg-field">
       <span class="cfg-lbl">Fin</span>
-      <input type="date" class="cfg-in" id="cfgEnd" onchange="updateCfg('endDate',this.value)">
+      <input type="text" class="cfg-in" id="cfgEnd" placeholder="dd/mm/aaaa" readonly
+        style="cursor:pointer"
+        onchange="updateCfg('endDate',this.value)"
+        onclick="DateRangePicker.open({startId:'cfgStart',endId:'cfgEnd',anchor:this,which:'end'})">
     </div>
     <div class="cfg-field">
       <span class="cfg-lbl">USD → ARS</span>
@@ -151,6 +158,10 @@
           <div class="frow"><label>Fondo de inversión</label><input type="number" id="balFund" placeholder="0" oninput="updateBal('fund',this.value)"></div>
           <div class="frow"><label>Ahorros</label><input type="number" id="balSav" placeholder="0" oninput="updateBal('savings',this.value)"></div>
           <div class="bal-toggles">
+            <label class="tog-wrap">
+              <div class="tog"><input type="checkbox" id="togCash" onchange="updateBal('includeCash',this.checked)"><span class="tog-sl"></span></div>
+              <span class="tog-lbl">Incluir efectivo</span>
+            </label>
             <label class="tog-wrap">
               <div class="tog"><input type="checkbox" id="togSav" onchange="updateBal('includeSavings',this.checked)"><span class="tog-sl"></span></div>
               <span class="tog-lbl">Incluir ahorros</span>
@@ -349,11 +360,15 @@
     <div class="mrow">
       <div class="mf">
         <label>Fecha de inicio</label>
-        <input type="date" id="nmStart">
+        <input type="text" id="nmStart" placeholder="dd/mm/aaaa" readonly
+          style="cursor:pointer; width:100%; background:var(--surface2); border:1px solid var(--border); color:var(--text); padding:6px 10px; border-radius:var(--radius-sm); font-family:inherit; font-size:13px;"
+          onclick="DateRangePicker.open({startId:'nmStart',endId:'nmEnd',anchor:this,which:'start'})">
       </div>
       <div class="mf">
         <label>Fecha de fin</label>
-        <input type="date" id="nmEnd">
+        <input type="text" id="nmEnd" placeholder="dd/mm/aaaa" readonly
+          style="cursor:pointer; width:100%; background:var(--surface2); border:1px solid var(--border); color:var(--text); padding:6px 10px; border-radius:var(--radius-sm); font-family:inherit; font-size:13px;"
+          onclick="DateRangePicker.open({startId:'nmStart',endId:'nmEnd',anchor:this,which:'end'})">
       </div>
     </div>
     <div class="mf">
@@ -422,8 +437,17 @@
     <div id="exportMonthList" style="display:none; margin-top:10px">
       <!-- rendered by JS -->
     </div>
+    <div id="exportDraftRow" style="display:none; margin-top:10px; padding-top:10px; border-top:1px solid var(--border)">
+      <div class="copy-opt" style="margin-bottom:0;cursor:default">
+        <div>
+          <div class="copy-opt-title">Exportar borrador</div>
+          <div class="copy-opt-sub">Descarga el borrador guardado antes del último conflicto de sync</div>
+        </div>
+      </div>
+    </div>
     <div class="m-actions">
       <button class="btn btn-ghost" onclick="closeExportModal()">Cancelar</button>
+      <button class="btn btn-ghost" id="exportDraftBtn" onclick="doExportDraft()" style="display:none">⬇ Exportar borrador</button>
       <button class="btn btn-primary" onclick="doExport()">⬇ Exportar</button>
     </div>
   </div>

@@ -194,9 +194,16 @@
     const hasDraft = !!localStorage.getItem(LS_DRAFT_KEY);
     const btn = document.getElementById('draftRecoverBtn');
     if (btn) btn.style.display = hasDraft ? 'inline-flex' : 'none';
+    const discardBtn = document.getElementById('draftDiscardBtn');
+    if (discardBtn) discardBtn.style.display = hasDraft ? 'inline-flex' : 'none';
     // Also update hamburger menu draft button
     const hmenuDraft = document.getElementById('hmenuDraftRecover');
     if (hmenuDraft) hmenuDraft.style.display = hasDraft ? 'block' : 'none';
+    // Update export modal draft button/row
+    const exportDraftBtn = document.getElementById('exportDraftBtn');
+    if (exportDraftBtn) exportDraftBtn.style.display = hasDraft ? 'inline-flex' : 'none';
+    const exportDraftRow = document.getElementById('exportDraftRow');
+    if (exportDraftRow) exportDraftRow.style.display = hasDraft ? 'block' : 'none';
   }
 
   // ─────────────────────────────────────────
@@ -434,6 +441,7 @@
       localStorage.setItem(LS_KEY, JSON.stringify(toUpload));
       _setSyncIndicator('syncing');
       await _pushToCloud(toUpload);
+      _reloadAppState();
     }
   }
 
@@ -505,8 +513,34 @@
   }
 
   // ─────────────────────────────────────────
-  //  NOTIFICACIÓN CON DEBOUNCE
+  //  DESCARTE DE BORRADOR
   // ─────────────────────────────────────────
+  async function discardDraft() {
+    const draftRaw = localStorage.getItem(LS_DRAFT_KEY);
+    if (!draftRaw) {
+      await _modal({
+        icon: '📭', title: 'Sin borrador disponible',
+        message: 'No hay ningún borrador guardado para descartar.',
+        isAlert: true,
+      });
+      return;
+    }
+
+    const confirmed = await _modal({
+      icon: '🗑', title: '¿Descartar el borrador?',
+      message: 'El borrador guardado antes del último conflicto de sync será eliminado permanentemente.',
+      detail: 'Esta acción no se puede deshacer.',
+      confirmText: 'Sí, descartar',
+      cancelText: 'Cancelar',
+      confirmClass: 'btn-danger',
+    });
+    if (!confirmed) return;
+
+    localStorage.removeItem(LS_DRAFT_KEY);
+    _updateDraftBtn();
+  }
+
+
   function notifyChange() {
     if (!_currentUser) return;
 
@@ -607,6 +641,7 @@
     notifyChange: notifyChange,
     authToggle:   authToggle,
     recoverDraft: recoverDraft,
+    discardDraft: discardDraft,
   };
 
 })();

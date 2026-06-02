@@ -90,7 +90,7 @@ function calc(m) {
   const theoAvail  = totalIncome - totalPlanned;
   const theoPerDay = theoAvail / totalDays;
 
-  const totalBal = (+bal.account||0) + (+bal.cash||0) + (+bal.fund||0) + (bal.includeSavings ? (+bal.savings||0) : 0);
+  const totalBal = (+bal.account||0) + (bal.includeCash ? (+bal.cash||0) : 0) + (+bal.fund||0) + (bal.includeSavings ? (+bal.savings||0) : 0);
   const monthlyAvail = totalBal - remaining;
 
   const refDate = m.refDate
@@ -158,8 +158,13 @@ function render() {
 
   // Config bar
   document.getElementById('cfgName').value  = m.name || '';
-  document.getElementById('cfgStart').value = m.startDate || '';
-  document.getElementById('cfgEnd').value   = m.endDate || '';
+  // Fechas: escribir ISO en data-iso y formato dd/mm/aaaa en value
+  const cfgStart = document.getElementById('cfgStart');
+  const cfgEnd   = document.getElementById('cfgEnd');
+  cfgStart.dataset.iso = m.startDate || '';
+  cfgStart.value = m.startDate ? m.startDate.split('-').reverse().join('/') : '';
+  cfgEnd.dataset.iso   = m.endDate || '';
+  cfgEnd.value   = m.endDate   ? m.endDate.split('-').reverse().join('/')   : '';
   document.getElementById('cfgUSD').value   = m.usdRate || '';
 
   // Income inputs
@@ -174,7 +179,8 @@ function render() {
   document.getElementById('balCash').value  = bal.cash || '';
   document.getElementById('balFund').value  = bal.fund || '';
   document.getElementById('balSav').value   = bal.savings || '';
-  document.getElementById('togSav').checked = bal.includeSavings || false;
+  document.getElementById('togSav').checked  = bal.includeSavings || false;
+  document.getElementById('togCash').checked = bal.includeCash    || false;
 
   refreshCalcs();
   renderPlanned(m);
@@ -624,6 +630,12 @@ function switchMonth(id) { S.activeId = id || null; save(); render(); }
 
 function updateCfg(field, val) {
   const m = getM(); if (!m) return;
+  // Para campos de fecha, leer el ISO real desde data-iso del input
+  if (field === 'startDate' || field === 'endDate') {
+    const inputId = field === 'startDate' ? 'cfgStart' : 'cfgEnd';
+    const el = document.getElementById(inputId);
+    val = el?.dataset?.iso || val;
+  }
   m[field] = val; save(); refreshCalcs();
 }
 
@@ -636,7 +648,8 @@ function updateInc(field, val) {
 function updateBal(field, val) {
   const m = getM(); if (!m) return;
   if (!m.balance) m.balance = {};
-  m.balance[field] = field === 'includeSavings' ? val : (+val || 0);
+  const boolFields = ['includeSavings', 'includeCash'];
+  m.balance[field] = boolFields.includes(field) ? val : (+val || 0);
   save(); refreshCalcs();
 }
 
@@ -857,8 +870,10 @@ function openNewMonthModal() {
     document.getElementById('nmCopySection').style.display = 'none';
   }
   document.getElementById('nmName').value  = sugName;
-  document.getElementById('nmStart').value = '';
-  document.getElementById('nmEnd').value   = '';
+  const nmS = document.getElementById('nmStart');
+  const nmE = document.getElementById('nmEnd');
+  nmS.value = ''; nmS.dataset.iso = '';
+  nmE.value = ''; nmE.dataset.iso = '';
   document.getElementById('nmUSD').value   = sugUSD;
   const r = document.querySelector('input[name="nmCopy"][value="copy"]');
   if (r) r.checked = true;
@@ -870,8 +885,10 @@ function closeNmModal() { document.getElementById('nmModal').style.display = 'no
 
 function createMonth() {
   const name  = document.getElementById('nmName').value.trim();
-  const start = document.getElementById('nmStart').value;
-  const end   = document.getElementById('nmEnd').value;
+  const nmStartEl = document.getElementById('nmStart');
+  const nmEndEl   = document.getElementById('nmEnd');
+  const start = nmStartEl?.dataset?.iso || '';
+  const end   = nmEndEl?.dataset?.iso   || '';
   const usd   = parseFloat(document.getElementById('nmUSD').value) || 0;
   const copy  = document.querySelector('input[name="nmCopy"]:checked')?.value;
   if (!name) { alert('El nombre es obligatorio'); return; }
@@ -886,7 +903,7 @@ function createMonth() {
     id: uid(), name, startDate: start, endDate: end, usdRate: usd,
     income: { salaryCurrentMonth: 0, salaryPreviousMonth: 0, previousMonthLeftover: 0 },
     expenses,
-    balance: { account: 0, cash: 0, fund: 0, savings: 0, includeSavings: false }
+    balance: { account: 0, cash: 0, fund: 0, savings: 0, includeSavings: false, includeCash: false }
   };
   S.months.push(nm);
   S.activeId = nm.id;
@@ -909,6 +926,12 @@ function switchTab(tab, btn) {
 function openExportModal() {
   document.getElementById('exportMultiple').checked = false;
   document.getElementById('exportMonthList').style.display = 'none';
+  // Refrescar visibilidad del botón de borrador
+  const hasDraft = !!localStorage.getItem('gm_v1_borrador');
+  const exportDraftBtn = document.getElementById('exportDraftBtn');
+  const exportDraftRow = document.getElementById('exportDraftRow');
+  if (exportDraftBtn) exportDraftBtn.style.display = hasDraft ? 'inline-flex' : 'none';
+  if (exportDraftRow) exportDraftRow.style.display = hasDraft ? 'block' : 'none';
   document.getElementById('exportModal').style.display = 'flex';
 }
 
@@ -961,8 +984,21 @@ function doExport() {
 }
 
 // ═══════════════════════════════════════
-//  IMPORT (with conflict resolution)
+//  EXPORT DRAFT
 // ═══════════════════════════════════════
+function doExportDraft() {
+  const raw = localStorage.getItem('gm_v1_borrador');
+  if (!raw) { alert('No hay borrador guardado para exportar.'); return; }
+  const blob = new Blob([raw], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'gastos_borrador_' + new Date().toISOString().slice(0,10) + '.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  closeExportModal();
+}
+
+
 function importData(ev) {
   const f = ev.target.files[0]; if (!f) return;
   const r = new FileReader();
@@ -1119,8 +1155,236 @@ document.addEventListener('click', e => {
   }
 });
 
+
 // ═══════════════════════════════════════
-//  INIT
+//  DATE-RANGE PICKER
 // ═══════════════════════════════════════
-load();
-render();
+(function () {
+  // Estado interno del picker
+  const _p = {
+    startId:  null,   // id del input "inicio"
+    endId:    null,   // id del input "fin"
+    onChange: null,   // callback(startISO, endISO) opcional
+    anchor:   null,   // elemento ancla para posicionar el dropdown
+    year:     0,
+    month:    0,      // 0-11
+    selecting: null,  // 'start' | 'end' — qué campo estamos esperando
+    start:    null,   // Date | null
+    end:      null,   // Date | null
+    el:       null,   // div#drpPopup
+  };
+
+  const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+                 'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  const DIAS  = ['Lu','Ma','Mi','Ju','Vi','Sa','Do'];
+
+  function _iso(d) {
+    if (!d) return '';
+    return d.getFullYear() + '-'
+      + String(d.getMonth()+1).padStart(2,'0') + '-'
+      + String(d.getDate()).padStart(2,'0');
+  }
+  function _fromISO(s) {
+    if (!s) return null;
+    const [y,m,d] = s.split('-').map(Number);
+    return new Date(y, m-1, d);
+  }
+  function _sameDay(a, b) {
+    return a && b && a.getFullYear()===b.getFullYear()
+      && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();
+  }
+
+  function _build() {
+    const div = document.createElement('div');
+    div.id = 'drpPopup';
+    div.className = 'drp-popup';
+    div.innerHTML = `
+      <div class="drp-header">
+        <button class="drp-nav" id="drpPrev" type="button">‹</button>
+        <span class="drp-title" id="drpTitle"></span>
+        <button class="drp-nav" id="drpNext" type="button">›</button>
+      </div>
+      <div class="drp-days-header">${DIAS.map(d=>`<span>${d}</span>`).join('')}</div>
+      <div class="drp-grid" id="drpGrid"></div>
+      <div class="drp-hint" id="drpHint"></div>
+    `;
+    document.body.appendChild(div);
+    div.querySelector('#drpPrev').addEventListener('click', e => { e.stopPropagation(); _changeMonth(-1); });
+    div.querySelector('#drpNext').addEventListener('click', e => { e.stopPropagation(); _changeMonth(+1); });
+    // Cerrar al hacer clic fuera
+    document.addEventListener('mousedown', _onOutside, true);
+    _p.el = div;
+  }
+
+  function _onOutside(e) {
+    if (_p.el && !_p.el.contains(e.target)) {
+      const isAnchor = (_p.anchor && _p.anchor.contains(e.target));
+      if (!isAnchor) _close();
+    }
+  }
+
+  function _close() {
+    if (_p.el) { _p.el.style.display = 'none'; }
+    document.removeEventListener('mousedown', _onOutside, true);
+  }
+
+  function _changeMonth(delta) {
+    _p.month += delta;
+    if (_p.month > 11) { _p.month = 0;  _p.year++; }
+    if (_p.month < 0)  { _p.month = 11; _p.year--; }
+    _render();
+  }
+
+  function _render() {
+    if (!_p.el) return;
+    _p.el.querySelector('#drpTitle').textContent = MESES[_p.month] + ' ' + _p.year;
+
+    // Hint
+    const hint = _p.el.querySelector('#drpHint');
+    if (_p.selecting === 'start') {
+      hint.textContent = 'Seleccioná la fecha de inicio';
+    } else {
+      hint.textContent = _p.start
+        ? 'Ahora seleccioná la fecha de fin'
+        : 'Seleccioná la fecha de fin';
+    }
+
+    // Grid
+    const grid = _p.el.querySelector('#drpGrid');
+    grid.innerHTML = '';
+
+    const firstDay = new Date(_p.year, _p.month, 1);
+    // Lunes=0 … Domingo=6 (ajuste de domingo nativo=0 a lunes=0)
+    let startOffset = (firstDay.getDay() + 6) % 7;
+    const daysInMonth = new Date(_p.year, _p.month + 1, 0).getDate();
+
+    // Celdas vacías antes del día 1
+    for (let i = 0; i < startOffset; i++) {
+      const blank = document.createElement('span');
+      blank.className = 'drp-cell drp-blank';
+      grid.appendChild(blank);
+    }
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const day = new Date(_p.year, _p.month, d);
+      const cell = document.createElement('span');
+      cell.className = 'drp-cell';
+      cell.textContent = d;
+      cell.dataset.date = _iso(day);
+
+      // Clases de estado
+      if (_sameDay(day, _p.start)) cell.classList.add('drp-start');
+      if (_sameDay(day, _p.end))   cell.classList.add('drp-end');
+      if (_p.start && _p.end && day > _p.start && day < _p.end)
+        cell.classList.add('drp-in-range');
+      if (_sameDay(day, _p.start) && _sameDay(day, _p.end))
+        cell.classList.add('drp-single');
+
+      cell.addEventListener('click', e => { e.stopPropagation(); _selectDay(day); });
+      grid.appendChild(cell);
+    }
+  }
+
+  function _selectDay(day) {
+    if (_p.selecting === 'start') {
+      _p.start = day;
+      // Si la nueva start es posterior al end, limpiar end
+      if (_p.end && day > _p.end) _p.end = null;
+      // Pasar a seleccionar fin
+      _p.selecting = 'end';
+      _render();
+      _writeInputs();
+    } else {
+      // Seleccionando fin
+      if (_p.start && day < _p.start) {
+        // Si eligen una fecha anterior al inicio, invertir
+        _p.end   = _p.start;
+        _p.start = day;
+      } else {
+        _p.end = day;
+      }
+      _writeInputs();
+      _render();
+      // Cerrar después de un pequeño delay para que el usuario vea el rango
+      setTimeout(_close, 180);
+    }
+  }
+
+  function _displayDate(isoStr) {
+    if (!isoStr) return '';
+    const [y, m, d] = isoStr.split('-');
+    return `${d}/${m}/${y}`;
+  }
+
+  function _writeInputs() {
+    const startEl  = document.getElementById(_p.startId);
+    const endEl    = document.getElementById(_p.endId);
+    const startISO = _iso(_p.start);
+    const endISO   = _iso(_p.end);
+
+    if (startEl) {
+      startEl.dataset.iso = startISO;
+      startEl.value = _displayDate(startISO);
+      startEl.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    if (endEl && _p.end) {
+      endEl.dataset.iso = endISO;
+      endEl.value = _displayDate(endISO);
+      endEl.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    if (_p.onChange) _p.onChange(startISO, endISO);
+  }
+
+  function _position(anchor) {
+    const rect = anchor.getBoundingClientRect();
+    const popup = _p.el;
+    popup.style.display = 'block';
+    // Posición provisional para medir
+    popup.style.left = '0px';
+    popup.style.top  = '0px';
+    const pw = popup.offsetWidth;
+    const ph = popup.offsetHeight;
+    let left = rect.left + window.scrollX;
+    let top  = rect.bottom + window.scrollY + 4;
+    // No salir por la derecha
+    if (left + pw > window.innerWidth - 8) left = window.innerWidth - pw - 8;
+    // No salir por abajo → abrir hacia arriba
+    if (top + ph > window.innerHeight + window.scrollY - 8)
+      top = rect.top + window.scrollY - ph - 4;
+    popup.style.left = left + 'px';
+    popup.style.top  = top  + 'px';
+  }
+
+  // ── API pública del picker ──────────────────────────────────────
+  // open({ startId, endId, anchor, which })
+  //   startId: id del input de inicio
+  //   endId:   id del input de fin
+  //   anchor:  elemento desde donde se abre (para posicionar)
+  //   which:   'start' | 'end'  — cuál campo disparó la apertura
+  window.DateRangePicker = {
+    open({ startId, endId, anchor, which }) {
+      _p.startId   = startId;
+      _p.endId     = endId;
+      _p.anchor    = anchor;
+      _p.selecting = which || 'start';
+      // Leer ISO desde data-iso (si ya fue puesto por el picker) o desde value directo
+      const startEl = document.getElementById(startId);
+      const endEl   = document.getElementById(endId);
+      _p.start = _fromISO(startEl?.dataset?.iso || startEl?.value);
+      _p.end   = _fromISO(endEl?.dataset?.iso   || endEl?.value);
+
+      // Mes a mostrar: el del campo que disparó la apertura, o el actual
+      const refDate = (_p.selecting === 'end' && _p.end)
+        ? _p.end
+        : (_p.start || new Date());
+      _p.year  = refDate.getFullYear();
+      _p.month = refDate.getMonth();
+
+      if (!_p.el) _build();
+      else document.addEventListener('mousedown', _onOutside, true);
+
+      _render();
+      _position(anchor);
+    },
+  };
+})();
