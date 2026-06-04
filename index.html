@@ -14,20 +14,19 @@
 <header>
   <div class="logo">◈ Finanzas</div>
   <div class="month-wrap">
-    <select class="month-sel" id="monthSel" onchange="switchMonth(this.value)">
+    <select class="month-sel" id="monthSel">
       <option value="">— Seleccioná un mes —</option>
     </select>
   </div>
   <div class="h-actions" id="hActions">
-    <button class="btn btn-primary" onclick="openNewMonthModal();closeHMenu()">+ Nuevo mes</button>
-    <button class="btn btn-ghost" onclick="openExportModal();closeHMenu()" title="Exportar datos">⬇ Exportar</button>
+    <button class="btn btn-primary" id="btnNewMonth">+ Nuevo mes</button>
+    <button class="btn btn-ghost" id="btnExport" title="Exportar datos">⬇ Exportar</button>
     <label class="btn btn-ghost" title="Importar JSON" style="cursor:pointer">
       ⬆ Importar
-      <input type="file" accept=".json" onchange="importData(event)" style="display:none">
+      <input type="file" accept=".json" id="importFile" style="display:none">
     </label>
     <div class="h-draft-actions" id="draftActions" style="display:none">
       <button class="btn btn-danger btn-sm" id="draftRecoverBtn2"
-              onclick="window.Sync?.recoverDraft();closeHMenu()"
               title="Recuperar borrador local guardado antes del último conflicto">↩ Recuperar borrador</button>
     </div>
   </div>
@@ -35,28 +34,28 @@
     <div id="authStatus" class="auth-status" style="display:none"></div>
     <span id="syncIndicator" class="sync-indicator" style="display:none"></span>
     <button class="btn btn-danger btn-sm" id="draftRecoverBtn"
-            onclick="window.Sync?.recoverDraft()"
             title="Recuperar borrador local guardado antes del último conflicto"
             style="display:none">↩ Recuperar borrador</button>
-    <button class="auth-btn" id="authBtn" onclick="window.Sync?.authToggle()">
+    <button class="auth-btn" id="authBtn">
       <span class="auth-btn-icon">G</span>Iniciar sesión
     </button>
     <!-- Hamburger: only visible on mobile -->
-    <button class="btn-hamburger" id="btnHamburger" onclick="toggleHMenu()" aria-label="Menú" aria-expanded="false">
+    <button class="btn-hamburger" id="btnHamburger" aria-label="Menú" aria-expanded="false">
       <span></span><span></span><span></span>
     </button>
   </div>
 </header>
+
 <!-- Mobile dropdown menu -->
 <div class="hmenu-dropdown" id="hmenuDropdown" style="display:none">
-  <button class="hmenu-item btn-primary-ghost" onclick="openNewMonthModal();closeHMenu()">+ Nuevo mes</button>
-  <button class="hmenu-item" onclick="openExportModal();closeHMenu()">⬇ Exportar</button>
+  <button class="hmenu-item btn-primary-ghost" id="btnNewMonthMobile">+ Nuevo mes</button>
+  <button class="hmenu-item" id="btnExportMobile">⬇ Exportar</button>
   <label class="hmenu-item" style="cursor:pointer">
     ⬆ Importar
-    <input type="file" accept=".json" onchange="importData(event);closeHMenu()" style="display:none">
+    <input type="file" accept=".json" id="importFileMobile" style="display:none">
   </label>
   <div id="hmenuDraftRecover" style="display:none">
-    <button class="hmenu-item hmenu-danger" onclick="window.Sync?.recoverDraft();closeHMenu()">↩ Recuperar borrador</button>
+    <button class="hmenu-item hmenu-danger" id="btnDraftRecoverMobile">↩ Recuperar borrador</button>
   </div>
 </div>
 
@@ -65,21 +64,21 @@
   <div class="cfg-scroll">
     <div class="cfg-field">
       <span class="cfg-lbl">Nombre</span>
-      <input type="text" class="cfg-in" id="cfgName" placeholder="Ej: Junio 2026" oninput="updateCfg('name',this.value)">
+      <input type="text" class="cfg-in" id="cfgName" placeholder="Ej: Junio 2026">
     </div>
     <div class="cfg-field">
       <span class="cfg-lbl">Inicio</span>
-      <input type="date" class="cfg-in" id="cfgStart" onchange="updateCfg('startDate',this.value)">
+      <input type="date" class="cfg-in" id="cfgStart">
     </div>
     <div class="cfg-field">
       <span class="cfg-lbl">Fin</span>
-      <input type="date" class="cfg-in" id="cfgEnd" onchange="updateCfg('endDate',this.value)">
+      <input type="date" class="cfg-in" id="cfgEnd">
     </div>
     <div class="cfg-field">
       <span class="cfg-lbl">USD → ARS</span>
-      <input type="number" class="cfg-in" id="cfgUSD" placeholder="Tipo de cambio" oninput="updateCfg('usdRate',parseFloat(this.value)||0)">
+      <input type="number" class="cfg-in" id="cfgUSD" placeholder="Tipo de cambio">
     </div>
-    <button class="btn btn-danger btn-sm cfg-del" onclick="deleteMonth()" title="Eliminar este mes">🗑 Eliminar mes</button>
+    <button class="btn btn-danger btn-sm cfg-del" id="btnDeleteMonth" title="Eliminar este mes">🗑 Eliminar mes</button>
   </div>
 </div>
 
@@ -91,7 +90,7 @@
     <div class="icon">📊</div>
     <h2>Gestor de gastos mensuales</h2>
     <p>Creá tu primer mes para empezar.</p>
-    <button class="btn btn-primary" onclick="openNewMonthModal()">+ Crear primer mes</button>
+    <button class="btn btn-primary" id="btnCreateFirst">+ Crear primer mes</button>
   </div>
 
   <!-- Month view -->
@@ -102,18 +101,18 @@
 
       <!-- Ingresos -->
       <div class="card">
-        <div class="card-title card-title--collapsible" onclick="toggleCard(this)">
+        <div class="card-title card-title--collapsible">
           <span>Ingresos del mes</span>
           <span class="card-chevron">▾</span>
         </div>
         <div class="card-body">
           <div class="frow">
             <label>Salario mes corriente</label>
-            <input type="number" id="incCurr" placeholder="0" oninput="updateInc('salaryCurrentMonth',this.value)">
+            <input type="number" id="incCurr" placeholder="0">
           </div>
           <div class="frow">
             <label>Salario mes vencido</label>
-            <input type="number" id="incPrev" placeholder="0" oninput="updateInc('salaryPreviousMonth',this.value)">
+            <input type="number" id="incPrev" placeholder="0">
           </div>
           <!-- Aumento info row -->
           <div class="salary-diff-row" id="salaryDiffRow" style="display:none">
@@ -130,7 +129,7 @@
           </div>
           <div class="frow">
             <label>Restante mes anterior</label>
-            <input type="number" id="incLeft" placeholder="0" oninput="updateInc('previousMonthLeftover',this.value)">
+            <input type="number" id="incLeft" placeholder="0">
           </div>
           <div class="total-row">
             <span class="total-lbl">Total disponible</span>
@@ -141,18 +140,18 @@
 
       <!-- Balance -->
       <div class="card">
-        <div class="card-title card-title--collapsible" onclick="toggleCard(this)">
+        <div class="card-title card-title--collapsible">
           <span>Balance actual</span>
           <span class="card-chevron">▾</span>
         </div>
         <div class="card-body">
-          <div class="frow"><label>Dinero en cuenta</label><input type="number" id="balAcc" placeholder="0" oninput="updateBal('account',this.value)"></div>
-          <div class="frow"><label>Efectivo</label><input type="number" id="balCash" placeholder="0" oninput="updateBal('cash',this.value)"></div>
-          <div class="frow"><label>Fondo de inversión</label><input type="number" id="balFund" placeholder="0" oninput="updateBal('fund',this.value)"></div>
-          <div class="frow"><label>Ahorros</label><input type="number" id="balSav" placeholder="0" oninput="updateBal('savings',this.value)"></div>
+          <div class="frow"><label>Dinero en cuenta</label><input type="number" id="balAcc" placeholder="0"></div>
+          <div class="frow"><label>Efectivo</label><input type="number" id="balCash" placeholder="0"></div>
+          <div class="frow"><label>Fondo de inversión</label><input type="number" id="balFund" placeholder="0"></div>
+          <div class="frow"><label>Ahorros</label><input type="number" id="balSav" placeholder="0"></div>
           <div class="bal-toggles">
             <label class="tog-wrap">
-              <div class="tog"><input type="checkbox" id="togSav" onchange="updateBal('includeSavings',this.checked)"><span class="tog-sl"></span></div>
+              <div class="tog"><input type="checkbox" id="togSav"><span class="tog-sl"></span></div>
               <span class="tog-lbl">Incluir ahorros</span>
             </label>
           </div>
@@ -165,7 +164,7 @@
 
       <!-- Resumen -->
       <div class="card">
-        <div class="card-title card-title--collapsible" onclick="toggleCard(this)">
+        <div class="card-title card-title--collapsible">
           <span>Resumen</span>
           <span class="card-chevron">▾</span>
         </div>
@@ -194,7 +193,7 @@
             <div class="metric">
               <div class="metric-lbl">Días restantes</div>
               <div class="metric-val neu" id="mDaysLeft">—</div>
-              <div id="mRefDate" onclick="openRefDateModal()" style="font-size:10px;color:var(--muted);margin-top:3px;cursor:pointer;text-decoration:underline dotted"></div>
+              <div id="mRefDate" style="font-size:10px;color:var(--muted);margin-top:3px;cursor:pointer;text-decoration:underline dotted"></div>
             </div>
           </div>
           <div class="big-metric">
@@ -210,45 +209,45 @@
 
       <!-- Calculadora rescate -->
       <div class="card">
-        <div class="card-title card-title--collapsible" onclick="toggleCard(this)">
+        <div class="card-title card-title--collapsible">
           <span>Calculadora de rescate</span>
           <span class="card-chevron">▾</span>
         </div>
         <div class="card-body">
-        <p style="font-size:12px; color:var(--muted); margin-bottom:10px">¿Cuánto rescatar del fondo entre dos fechas?</p>
-        <div class="resc-inputs">
-          <input type="date" id="rescFrom" onchange="calcRescatar()">
-          <span style="color:var(--muted);font-size:12px">→</span>
-          <input type="date" id="rescTo" onchange="calcRescatar()">
-          <button class="btn btn-ghost btn-sm" onclick="clearRescDates()" title="Limpiar fechas">✕</button>
-        </div>
-
-        <!-- Toggle restar cuenta -->
-        <div class="resc-option">
-          <label class="tog-wrap">
-            <div class="tog"><input type="checkbox" id="rescTogAccount" onchange="calcRescatar()"><span class="tog-sl"></span></div>
-            <span class="tog-lbl">Restar dinero en cuenta</span>
-          </label>
-        </div>
-
-        <!-- Checklist gastos previstos -->
-        <div class="resc-option">
-          <div class="resc-exp-toggle" onclick="toggleRescExpList()">
-            <span class="tog-lbl">Incluir gastos previstos</span>
-            <span class="resc-exp-arrow" id="rescExpArrow">▸</span>
+          <p style="font-size:12px; color:var(--muted); margin-bottom:10px">¿Cuánto rescatar del fondo entre dos fechas?</p>
+          <div class="resc-inputs">
+            <input type="date" id="rescFrom">
+            <span style="color:var(--muted);font-size:12px">→</span>
+            <input type="date" id="rescTo">
+            <button class="btn btn-ghost btn-sm" id="btnClearRescDates" title="Limpiar fechas">✕</button>
           </div>
-          <div id="rescExpList" style="display:none; margin-top:6px;">
-            <!-- Rendered by JS -->
-          </div>
-        </div>
 
-        <div class="resc-result">
-          <div>
-            <div id="rescDaysText" style="font-size:12px;color:var(--muted);margin-bottom:3px">Seleccioná un rango</div>
-            <div class="resc-amount" id="rescAmount">—</div>
+          <!-- Toggle restar cuenta -->
+          <div class="resc-option">
+            <label class="tog-wrap">
+              <div class="tog"><input type="checkbox" id="rescTogAccount"><span class="tog-sl"></span></div>
+              <span class="tog-lbl">Restar dinero en cuenta</span>
+            </label>
           </div>
-          <div class="resc-sub" id="rescPerDay"></div>
-        </div>
+
+          <!-- Checklist gastos previstos -->
+          <div class="resc-option">
+            <div class="resc-exp-toggle">
+              <span class="tog-lbl">Incluir gastos previstos</span>
+              <span class="resc-exp-arrow" id="rescExpArrow">▸</span>
+            </div>
+            <div id="rescExpList" style="display:none; margin-top:6px;">
+              <!-- Rendered by JS -->
+            </div>
+          </div>
+
+          <div class="resc-result">
+            <div>
+              <div id="rescDaysText" style="font-size:12px;color:var(--muted);margin-bottom:3px">Seleccioná un rango</div>
+              <div class="resc-amount" id="rescAmount">—</div>
+            </div>
+            <div class="resc-sub" id="rescPerDay"></div>
+          </div>
         </div><!-- /card-body -->
       </div><!-- /card -->
 
@@ -257,8 +256,8 @@
     <!-- ── RIGHT PANEL ── -->
     <div class="right">
       <div class="tabs">
-        <button class="tab-btn active" onclick="switchTab('planned',this)">Gastos previstos</button>
-        <button class="tab-btn" onclick="switchTab('payments',this)">Pagos realizados</button>
+        <button class="tab-btn active" id="tabBtnPlanned">Gastos previstos</button>
+        <button class="tab-btn" id="tabBtnPayments">Pagos realizados</button>
       </div>
 
       <!-- Tab Previstos -->
@@ -267,10 +266,10 @@
           <span class="tcount" id="expCount">0 gastos</span>
           <div style="display:flex;gap:6px;align-items:center">
             <label class="tog-wrap" title="Ordenar por fecha prevista">
-              <div class="tog"><input type="checkbox" id="togSortDate" onchange="onSortToggle()"><span class="tog-sl"></span></div>
+              <div class="tog"><input type="checkbox" id="togSortDate"><span class="tog-sl"></span></div>
               <span class="tog-lbl">Ordenar por fecha</span>
             </label>
-            <button class="btn btn-primary btn-sm" onclick="openExpModal()">+ Agregar gasto</button>
+            <button class="btn btn-primary btn-sm" id="btnAddExpense">+ Agregar gasto</button>
           </div>
         </div>
         <div id="plannedList"></div>
@@ -281,7 +280,7 @@
         <div class="tbar">
           <span class="tcount" id="payCount">0 gastos</span>
           <label class="tog-wrap" title="Ordenar por fecha de pago/prevista">
-            <div class="tog"><input type="checkbox" id="togSortPayments" checked onchange="onPaymentSortToggle()"><span class="tog-sl"></span></div>
+            <div class="tog"><input type="checkbox" id="togSortPayments" checked><span class="tog-sl"></span></div>
             <span class="tog-lbl">Ordenar por fecha</span>
           </label>
         </div>
@@ -293,7 +292,7 @@
 </div><!-- /content -->
 
 <!-- ═══════════ MODAL: EXPENSE ═══════════ -->
-<div class="modal-ov" id="expModal" style="display:none" onclick="if(event.target===this)closeExpModal()">
+<div class="modal-ov" id="expModal" style="display:none">
   <div class="modal">
     <div class="modal-title" id="expModalTitle">Agregar gasto</div>
     <input type="hidden" id="editExpId">
@@ -328,18 +327,18 @@
       <label>Fecha prevista (opcional)</label>
       <div style="display:flex;gap:6px;align-items:center">
         <input type="date" id="expDate" style="flex:1">
-        <button type="button" class="btn btn-ghost btn-sm" onclick="clearExpDate()" title="Limpiar fecha">✕</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="btnClearExpDate" title="Limpiar fecha">✕</button>
       </div>
     </div>
     <div class="m-actions">
-      <button class="btn btn-ghost" onclick="closeExpModal()">Cancelar</button>
-      <button class="btn btn-primary" onclick="saveExp()">Guardar</button>
+      <button class="btn btn-ghost" id="btnCancelExp">Cancelar</button>
+      <button class="btn btn-primary" id="btnSaveExp">Guardar</button>
     </div>
   </div>
 </div>
 
 <!-- ═══════════ MODAL: NEW MONTH ═══════════ -->
-<div class="modal-ov" id="nmModal" style="display:none" onclick="if(event.target===this)closeNmModal()">
+<div class="modal-ov" id="nmModal" style="display:none">
   <div class="modal">
     <div class="modal-title">Nuevo mes</div>
     <div class="mf">
@@ -374,14 +373,14 @@
       </div>
     </div>
     <div class="m-actions">
-      <button class="btn btn-ghost" onclick="closeNmModal()">Cancelar</button>
-      <button class="btn btn-primary" onclick="createMonth()">Crear mes</button>
+      <button class="btn btn-ghost" id="btnCancelNm">Cancelar</button>
+      <button class="btn btn-primary" id="btnCreateMonth">Crear mes</button>
     </div>
   </div>
 </div>
 
 <!-- ═══════════ MODAL: PARTIAL PAYMENTS ═══════════ -->
-<div class="modal-ov" id="partialModal" style="display:none" onclick="if(event.target===this)closePartialModal()">
+<div class="modal-ov" id="partialModal" style="display:none">
   <div class="modal">
     <div class="modal-title">Pagos parciales — <span id="partialExpName"></span></div>
     <input type="hidden" id="partialExpId">
@@ -391,7 +390,7 @@
         <label>Fecha del pago</label>
         <div style="display:flex;gap:6px;align-items:center">
           <input type="date" id="partialDate" style="flex:1">
-          <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('partialDate').value=''" title="Limpiar fecha">✕</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="btnClearPartialDate" title="Limpiar fecha">✕</button>
         </div>
       </div>
       <div class="mf">
@@ -400,19 +399,19 @@
       </div>
     </div>
     <div class="m-actions">
-      <button class="btn btn-ghost" onclick="closePartialModal()">Cerrar</button>
-      <button class="btn btn-primary" onclick="addPartialPayment()">+ Agregar pago</button>
+      <button class="btn btn-ghost" id="btnClosePartial">Cerrar</button>
+      <button class="btn btn-primary" id="btnAddPartial">+ Agregar pago</button>
     </div>
   </div>
 </div>
 
 <!-- ═══════════ MODAL: EXPORT ═══════════ -->
-<div class="modal-ov" id="exportModal" style="display:none" onclick="if(event.target===this)closeExportModal()">
+<div class="modal-ov" id="exportModal" style="display:none">
   <div class="modal">
     <div class="modal-title">Exportar datos</div>
     <div class="mf">
       <div class="copy-opt" style="margin-bottom:0;cursor:default">
-        <input type="checkbox" id="exportMultiple" onchange="toggleExportMultiple()" style="width:15px;height:15px;accent-color:var(--accent);flex-shrink:0;cursor:pointer">
+        <input type="checkbox" id="exportMultiple" style="width:15px;height:15px;accent-color:var(--accent);flex-shrink:0;cursor:pointer">
         <label for="exportMultiple" style="cursor:pointer">
           <div class="copy-opt-title">Exportar más de un mes</div>
           <div class="copy-opt-sub">Seleccioná qué meses incluir en el archivo</div>
@@ -423,8 +422,8 @@
       <!-- rendered by JS -->
     </div>
     <div class="m-actions">
-      <button class="btn btn-ghost" onclick="closeExportModal()">Cancelar</button>
-      <button class="btn btn-primary" onclick="doExport()">⬇ Exportar</button>
+      <button class="btn btn-ghost" id="btnCancelExport">Cancelar</button>
+      <button class="btn btn-primary" id="btnDoExport">⬇ Exportar</button>
     </div>
   </div>
 </div>
@@ -439,15 +438,15 @@
       <input type="text" id="conflictNewName" placeholder="Nuevo nombre">
     </div>
     <div class="m-actions">
-      <button class="btn btn-ghost" onclick="resolveConflict('skip')">Omitir</button>
-      <button class="btn btn-ghost" onclick="resolveConflict('rename')">Importar con nuevo nombre</button>
-      <button class="btn btn-primary" onclick="resolveConflict('replace')">Reemplazar</button>
+      <button class="btn btn-ghost" id="btnConflictSkip">Omitir</button>
+      <button class="btn btn-ghost" id="btnConflictRename">Importar con nuevo nombre</button>
+      <button class="btn btn-primary" id="btnConflictReplace">Reemplazar</button>
     </div>
   </div>
 </div>
 
 <!-- ═══════════ MODAL: REF DATE ═══════════ -->
-<div class="modal-ov" id="refDateModal" style="display:none" onclick="if(event.target===this)closeRefDateModal()">
+<div class="modal-ov" id="refDateModal" style="display:none">
   <div class="modal" style="max-width:320px">
     <div class="modal-title">Fecha de consulta</div>
     <p style="font-size:12px;color:var(--muted);margin-bottom:14px">El cálculo de "días restantes" y "disponible por día (real)" usa esta fecha como punto de partida. Por defecto es hoy.</p>
@@ -456,14 +455,14 @@
       <input type="date" id="refDateInput">
     </div>
     <div class="m-actions">
-      <button class="btn btn-ghost" onclick="clearRefDate()" title="Eliminar la fecha personalizada y volver al cálculo automático por día de hoy">↺ Restablecer a hoy</button>
-      <button class="btn btn-ghost" onclick="closeRefDateModal()">Cancelar</button>
-      <button class="btn btn-primary" onclick="saveRefDate()">Guardar</button>
+      <button class="btn btn-ghost" id="btnResetRefDate" title="Eliminar la fecha personalizada y volver al cálculo automático por día de hoy">↺ Restablecer a hoy</button>
+      <button class="btn btn-ghost" id="btnCancelRefDate">Cancelar</button>
+      <button class="btn btn-primary" id="btnSaveRefDate">Guardar</button>
     </div>
   </div>
 </div>
 
-<!-- ═══════════ MODAL: SYNC (conflictos, alertas y confirmaciones) ═══════════ -->
+<!-- ═══════════ MODAL: SYNC ═══════════ -->
 <div class="modal-ov" id="syncModal" style="display:none">
   <div class="modal sync-modal">
     <div class="sync-modal-icon" id="syncModalIcon"></div>
@@ -477,7 +476,7 @@
   </div>
 </div>
 
-<script src="script.js"></script>
 <script src="sync.js"></script>
+<script type="module" src="js/main.js"></script>
 </body>
 </html>
