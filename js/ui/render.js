@@ -286,10 +286,16 @@ export function renderPayments(m) {
   let html = '<div id="payRowsContainer">';
 
   displayExps.forEach(e => {
-    const planARS    = plannedARS(e, rate);
-    const paid       = paidAmt(e, rate);
-    const hasPartial = e.partialPayments?.length > 0;
-    const actualVal  = (e.actualAmount !== '' && e.actualAmount != null) ? e.actualAmount : '';
+    const planARS        = plannedARS(e, rate);
+    const paid           = paidAmt(e, rate);
+    const hasPartial     = e.partialPayments?.length > 0;
+    // Moneda del pago real: respetar lo guardado en estado, con fallback Opción A.
+    const actualCurrency = e.actualCurrency ?? (e.isUSD ? 'USD' : 'ARS');
+    // Cuando hay parciales, mostrar el total ARS calculado por paidAmt.
+    // Sin parciales, mostrar el actualAmount ingresado manualmente.
+    const actualVal      = hasPartial
+      ? (paid > 0 ? Math.round(paid) : '')
+      : (e.actualAmount !== '' && e.actualAmount != null ? e.actualAmount : '');
     const actualDate = e.actualDate || '';
     const dimStyle   = e.paid ? '' : 'opacity:.5';
 
@@ -338,10 +344,18 @@ export function renderPayments(m) {
               data-action="clear-actual-date" data-id="${e.id}"
               title="Limpiar fecha">✕</button>
           </div>
-          <input type="number" class="p-amt-in" value="${actualVal}"
-            placeholder="${Math.round(planARS)}" style="${dimStyle}"
-            data-input="upd-actual-amount" data-id="${e.id}"
-            title="Monto real pagado">
+          <div style="display:flex;gap:3px;align-items:center">
+            <input type="number" class="p-amt-in" value="${actualVal}"
+              placeholder="${Math.round(planARS)}" style="${dimStyle}"
+              data-input="upd-actual-amount" data-id="${e.id}"
+              title="Monto real pagado">
+            <select class="p-currency-sel" style="${dimStyle};font-size:11px;padding:2px 3px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);cursor:pointer"
+              data-change="upd-actual-currency" data-id="${e.id}"
+              title="Moneda del pago">
+              <option value="ARS" ${actualCurrency === 'ARS' ? 'selected' : ''}>ARS</option>
+              <option value="USD" ${actualCurrency === 'USD' ? 'selected' : ''}>USD</option>
+            </select>
+          </div>
         </div>
         <div style="display:flex;gap:4px;justify-content:flex-end;flex-wrap:wrap">
           ${statusBadge}
@@ -383,7 +397,9 @@ export function renderPartialList(e, rate) {
   const cont      = document.getElementById('partialList');
   const partials  = e.partialPayments || [];
   const planARS   = plannedARS(e, rate);
-  const totalPaid = partials.reduce((s, p) => s + (+p.amount || 0), 0);
+  // paidAmt ya aplica la conversión correcta por moneda de cada parcial.
+  const totalARS  = paidAmt(e, rate);
+  const defaultCurrency = e.isUSD ? 'USD' : 'ARS';
 
   if (partials.length === 0) {
     cont.innerHTML = '<div style="font-size:12px;color:var(--muted);margin-bottom:8px">Sin pagos parciales registrados.</div>';
@@ -392,10 +408,14 @@ export function renderPartialList(e, rate) {
 
   let html = '<div style="margin-bottom:10px">';
   partials.forEach(p => {
-    // data-action → click | data-id = expId | data-partial-id = partialId
+    // Cada parcial muestra su monto en la moneda en que fue ingresado.
+    const pCurrency  = p.currency ?? defaultCurrency;
+    const amtDisplay = pCurrency === 'USD'
+      ? `USD ${(+p.amount || 0).toFixed(2)}`
+      : fmt(+p.amount || 0);
     html += `<div class="partial-item">
       <span class="partial-item-date">${p.date ? fmtDate(p.date) : '—'}</span>
-      <span class="partial-item-amt">${fmt(+p.amount || 0)}</span>
+      <span class="partial-item-amt">${amtDisplay} <span style="font-size:10px;color:var(--muted)">${pCurrency}</span></span>
       <button class="btn btn-danger btn-sm btn-icon"
         data-action="remove-partial" data-id="${e.id}" data-partial-id="${p.id}"
         title="Eliminar">✕</button>
@@ -404,11 +424,11 @@ export function renderPartialList(e, rate) {
 
   html += `<div style="display:flex;justify-content:space-between;padding-top:8px;border-top:1px solid var(--border);margin-top:4px">
     <span style="font-size:12px;color:var(--label)">Total pagado</span>
-    <span style="font-family:'DM Mono',monospace;font-size:13px;color:var(--accent)">${fmt(totalPaid)}</span>
+    <span style="font-family:'DM Mono',monospace;font-size:13px;color:var(--accent)">${fmt(totalARS)}</span>
   </div>
   <div style="display:flex;justify-content:space-between;padding-top:4px">
     <span style="font-size:12px;color:var(--label)">Saldo restante</span>
-    <span style="font-family:'DM Mono',monospace;font-size:13px;color:var(--muted)">${fmt(Math.max(0, planARS - totalPaid))}</span>
+    <span style="font-family:'DM Mono',monospace;font-size:13px;color:var(--muted)">${fmt(Math.max(0, planARS - totalARS))}</span>
   </div>`;
 
   html += '</div>';

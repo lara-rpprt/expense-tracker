@@ -116,6 +116,8 @@ export function addMonth(data, baseExpenses = []) {
     paid:            false,
     actualDate:      '',
     actualAmount:    '',
+    // Resetear moneda de pago al copiar: usa la moneda del gasto copiado.
+    actualCurrency:  e.isUSD ? 'USD' : 'ARS',
     partialPayments: [],
   }));
 
@@ -154,17 +156,21 @@ export function deleteMonth() {
 export function addExpense(data) {
   const m = getM(); if (!m) return;
   if (!m.expenses) m.expenses = [];
+  const isUSD = data.isUSD ?? false;
   m.expenses.push({
     id:               uid(),
     name:             data.name,
     plannedAmount:    data.plannedAmount   ?? 0,
-    isUSD:            data.isUSD           ?? false,
+    isUSD,
     plannedDate:      data.plannedDate     ?? '',
     installmentNum:   data.installmentNum  ?? null,
     installmentTotal: data.installmentTotal ?? null,
     paid:             false,
     actualDate:       '',
     actualAmount:     '',
+    // Moneda del pago real. El usuario puede cambiarla en "Pagos realizados".
+    // Default: misma moneda que el gasto (Opción A).
+    actualCurrency:   isUSD ? 'USD' : 'ARS',
     partialPayments:  [],
   });
   save();
@@ -265,11 +271,14 @@ export function reorderExpenses(srcId, tgtId) {
  * @param {string} date   - ISO o vacío
  * @param {number} amount
  */
-export function addPartialPayment(expId, date, amount) {
+/**
+ * @param {string} currency - 'ARS' | 'USD' (moneda del monto ingresado)
+ */
+export function addPartialPayment(expId, date, amount, currency = 'ARS') {
   const m = getM(); if (!m) return;
   const e = m.expenses.find(x => x.id === expId); if (!e) return;
   if (!e.partialPayments) e.partialPayments = [];
-  e.partialPayments.push({ id: uid(), date: date || '', amount });
+  e.partialPayments.push({ id: uid(), date: date || '', amount, currency });
   save();
 }
 
@@ -282,6 +291,19 @@ export function removePartial(expId, partialId) {
   const m = getM(); if (!m) return;
   const e = m.expenses.find(x => x.id === expId); if (!e) return;
   e.partialPayments = (e.partialPayments ?? []).filter(p => p.id !== partialId);
+  save();
+}
+
+/**
+ * Actualiza la moneda del pago real de un gasto.
+ * Llamado cuando el usuario cambia el selector ARS/USD en "Pagos realizados".
+ * @param {string} id
+ * @param {'ARS'|'USD'} currency
+ */
+export function updateActualCurrency(id, currency) {
+  const m = getM(); if (!m) return;
+  const e = m.expenses.find(x => x.id === id); if (!e) return;
+  e.actualCurrency = currency;
   save();
 }
 

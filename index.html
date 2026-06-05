@@ -395,7 +395,14 @@
       </div>
       <div class="mf">
         <label>Monto pagado</label>
-        <input type="number" id="partialAmt" placeholder="0">
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="number" id="partialAmt" placeholder="0" style="flex:1">
+          <select id="partialCurrency" style="font-size:12px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer" title="Moneda del pago">
+            <option value="ARS">ARS</option>
+            <option value="USD">USD</option>
+          </select>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:3px">Elegí la moneda en que realizaste este pago</div>
       </div>
     </div>
     <div class="m-actions">

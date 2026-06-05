@@ -219,6 +219,8 @@ export function openPartialModal(expId) {
   document.getElementById('partialExpName').textContent = e.name;
   document.getElementById('partialDate').value         = '';
   document.getElementById('partialAmt').value          = '';
+  // Pre-seleccionar la moneda del gasto original como default del selector.
+  document.getElementById('partialCurrency').value     = e.isUSD ? 'USD' : 'ARS';
 
   renderPartialList(e, m.usdRate || 1);
   document.getElementById('partialModal').style.display = 'flex';
@@ -231,13 +233,15 @@ export function closePartialModal() {
 
 /** Lee el formulario, agrega un pago parcial y actualiza la UI. */
 export function addPartialPayment() {
-  const expId = document.getElementById('partialExpId').value;
-  const date  = document.getElementById('partialDate').value;
-  const amt   = parseFloat(document.getElementById('partialAmt').value);
+  const expId    = document.getElementById('partialExpId').value;
+  const date     = document.getElementById('partialDate').value;
+  const amt      = parseFloat(document.getElementById('partialAmt').value);
+  // Leer la moneda elegida por el usuario para este pago parcial específico.
+  const currency = document.getElementById('partialCurrency').value;
 
   if (!amt || isNaN(amt)) { alert('Ingresá un monto válido'); return; }
 
-  stateAddPartial(expId, date, amt);
+  stateAddPartial(expId, date, amt, currency);
 
   document.getElementById('partialDate').value = '';
   document.getElementById('partialAmt').value  = '';

@@ -12,14 +12,39 @@
  * @param {number} usdRate
  * @returns {number}
  */
+// ─────────────────────────────────────────
+//  Helper privado
+// ─────────────────────────────────────────
+
+/**
+ * Convierte un monto a ARS según su moneda.
+ * Si ya está en ARS, lo devuelve sin modificar.
+ * @param {number} amount
+ * @param {'ARS'|'USD'} currency
+ * @param {number} rate
+ * @returns {number}
+ */
+function _toARS(amount, currency, rate) {
+  return currency === 'USD' ? amount * rate : amount;
+}
+
 export function paidAmt(expense, usdRate) {
   if (expense.partialPayments?.length > 0) {
-    return expense.partialPayments.reduce((sum, p) => sum + (+p.amount || 0), 0);
+    // Cada parcial tiene su propia moneda (p.currency).
+    // Datos sin currency: se usa Opción A (moneda del gasto original).
+    const defaultCurrency = expense.isUSD ? 'USD' : 'ARS';
+    return expense.partialPayments.reduce((sum, p) => {
+      const currency = p.currency ?? defaultCurrency;
+      return sum + _toARS(+p.amount || 0, currency, usdRate);
+    }, 0);
   }
   if (expense.paid) {
     const hasActual = expense.actualAmount !== '' && expense.actualAmount != null;
     const value     = hasActual ? +expense.actualAmount : +expense.plannedAmount || 0;
-    return expense.isUSD ? value * usdRate : value;
+    // actualCurrency: moneda elegida por el usuario al registrar el pago.
+    // Datos sin actualCurrency: se usa Opción A (moneda del gasto original).
+    const currency  = expense.actualCurrency ?? (expense.isUSD ? 'USD' : 'ARS');
+    return _toARS(value, currency, usdRate);
   }
   return 0;
 }

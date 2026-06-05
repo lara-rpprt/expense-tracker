@@ -18,11 +18,12 @@
 
 import {
   getM,
-  togglePaid       as stateTogglePaid,
-  updPayment       as stateUpdPayment,
-  clearActualDate  as stateClearActual,
-  saveInlineDate   as stateSaveInline,
-  clearPlannedDate as stateClearPlanned,
+  togglePaid            as stateTogglePaid,
+  updPayment            as stateUpdPayment,
+  clearActualDate       as stateClearActual,
+  saveInlineDate        as stateSaveInline,
+  clearPlannedDate      as stateClearPlanned,
+  updateActualCurrency  as stateUpdateActualCurrency,
 } from '../state.js';
 
 import {
@@ -90,6 +91,14 @@ const _onChange = {
 
   // Rescatar
   'calc-rescatar': () => calcRescatar(),
+
+  // Moneda del pago real (selector ARS/USD en la fila de pagos)
+  // Re-renderiza la lista completa para reflejar el cambio de inmediato.
+  'upd-actual-currency': (el) => {
+    stateUpdateActualCurrency(el.dataset.id, el.value);
+    renderPayments(getM());
+    refreshCalcs();
+  },
 };
 
 // — Input actions (disparado en cada tecla) —
@@ -138,8 +147,14 @@ function _delegateOn(container) {
     if (el.classList.contains('e-date-inline')) {
       hideInlineDateEdit(el.dataset.id);
     }
-    if (el.classList.contains('p-date-in') || el.classList.contains('p-amt-in')) {
+    if (el.classList.contains('p-date-in')) {
       flashSaved(el);
+    }
+    // Al salir del input de monto, re-renderizar la lista para que la fila
+    // muestre el valor guardado actualizado (soluciona el lag visual reportado).
+    if (el.classList.contains('p-amt-in')) {
+      renderPayments(getM());
+      refreshCalcs();
     }
   });
 }
