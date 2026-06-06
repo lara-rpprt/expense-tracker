@@ -385,25 +385,25 @@
     <div class="modal-title">Pagos parciales — <span id="partialExpName"></span></div>
     <input type="hidden" id="partialExpId">
     <div id="partialList" style="margin-bottom:12px"></div>
-    <div class="mrow" style="margin-bottom:8px">
-      <div class="mf">
-        <label>Fecha del pago</label>
-        <div style="display:flex;gap:6px;align-items:center">
-          <input type="date" id="partialDate" style="flex:1">
-          <button type="button" class="btn btn-ghost btn-sm" id="btnClearPartialDate" title="Limpiar fecha">✕</button>
-        </div>
+    <div class="mf">
+      <label>Fecha del pago</label>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input type="date" id="partialDate" style="flex:1">
+        <button type="button" class="btn btn-ghost btn-sm" id="btnClearPartialDate" title="Limpiar fecha">✕</button>
       </div>
-      <div class="mf">
-        <label>Monto pagado</label>
-        <div style="display:flex;gap:6px;align-items:center">
-          <input type="number" id="partialAmt" placeholder="0" style="flex:1">
-          <select id="partialCurrency" style="font-size:12px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer" title="Moneda del pago">
-            <option value="ARS">ARS</option>
-            <option value="USD">USD</option>
-          </select>
-        </div>
-        <div style="font-size:11px;color:var(--muted);margin-top:3px">Elegí la moneda en que realizaste este pago</div>
+    </div>
+    <div class="mf">
+      <label>Monto pagado</label>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input type="number" id="partialAmt" placeholder="0" style="flex:1;min-width:0">
+        <select id="partialCurrency"
+          style="width:68px;flex-shrink:0;font-size:12px;padding:4px 4px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer"
+          title="Moneda del pago">
+          <option value="ARS">ARS</option>
+          <option value="USD">USD</option>
+        </select>
       </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:3px">Elegí la moneda en que realizaste este pago</div>
     </div>
     <div class="m-actions">
       <button class="btn btn-ghost" id="btnClosePartial">Cerrar</button>
