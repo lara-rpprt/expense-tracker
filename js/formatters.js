@@ -8,11 +8,14 @@
 /**
  * Formatea un número como moneda ARS.
  * @param {number} n
- * @returns {string}  e.g. "$12.500" o "—" si el valor no es válido
+ * @returns {string}  e.g. "$12.500,75" o "—" si el valor no es válido
  */
 export function fmt(n) {
   if (n == null || isNaN(n)) return '—';
-  return '$' + Math.round(n).toLocaleString('es-AR');
+  return '$' + n.toLocaleString('es-AR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 /**
