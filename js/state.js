@@ -40,6 +40,11 @@ export function save() {
   document.dispatchEvent(new CustomEvent('state:changed'));
 }
 
+/** Elimina el borrador local guardado por Sync tras un conflicto de sincronización. */
+export function discardDraft() {
+  localStorage.removeItem('gm_v1_borrador');
+}
+
 // ─────────────────────────────────────────
 //  Accessors (solo lectura)
 // ─────────────────────────────────────────

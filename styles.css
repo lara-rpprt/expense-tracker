@@ -24,6 +24,13 @@ select.month-sel {
   cursor: pointer; min-width: 180px; max-width: 260px;
 }
 .h-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.h-draft-actions {
+  display: flex; gap: 6px; align-items: center; flex-shrink: 0;
+  padding-left: 10px; margin-left: 4px;
+  border-left: 1px solid var(--border);
+}
+.h-draft-actions .btn { opacity: 0.8; font-size: 12px; }
+.h-draft-actions .btn:hover { opacity: 1; }
 
 /* ─── BUTTONS ─── */
 .btn { padding: 5px 13px; border-radius: var(--radius-sm); border: none; cursor: pointer; font-family: inherit; font-size: 13px; font-weight: 500; transition: all .15s; display: inline-flex; align-items: center; gap: 5px; }
@@ -533,7 +540,6 @@ input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(.45); }
   .month-wrap { order: 3; flex: 0 0 100%; }      /* fila 2: selector ancho completo */
   select.month-sel { width: 100%; max-width: none; min-width: 0; font-size: 13px; }
   /* Borrador ya está en el hamburger — ocultar botón inline del header */
-  #draftRecoverBtn { display: none !important; }
   .auth-area { border-left: none; padding-left: 0; }
 
   /* Config bar → 3 filas lógicas */

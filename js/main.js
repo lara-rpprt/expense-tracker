@@ -15,6 +15,7 @@ import { load, getM,
   updateCfg        as stateCfg,
   updateInc        as stateInc,
   updateBal        as stateBal,
+  discardDraft,
 } from './state.js';
 
 import {
@@ -106,11 +107,15 @@ document.getElementById('btnExport')
 document.getElementById('importFile')
   .addEventListener('change', e => Modals.importData(e));
 
-document.getElementById('draftRecoverBtn')
-  .addEventListener('click', () => window.Sync?.recoverDraft());
-
 document.getElementById('draftRecoverBtn2')
-  .addEventListener('click', () => { window.Sync?.recoverDraft(); _closeHMenu(); });
+  .addEventListener('click', () => { window.Sync?.recoverDraft(); });
+
+document.getElementById('draftDiscardBtn2')
+  .addEventListener('click', () => {
+    discardDraft();
+    document.getElementById('draftActions').style.display      = 'none';
+    document.getElementById('hmenuDraftRecover').style.display = 'none';
+  });
 
 document.getElementById('authBtn')
   .addEventListener('click', () => window.Sync?.authToggle());
@@ -133,6 +138,14 @@ document.getElementById('importFileMobile')
 
 document.getElementById('btnDraftRecoverMobile')
   .addEventListener('click', () => { window.Sync?.recoverDraft(); _closeHMenu(); });
+
+document.getElementById('btnDraftDiscardMobile')
+  .addEventListener('click', () => {
+    discardDraft();
+    document.getElementById('draftActions').style.display      = 'none';
+    document.getElementById('hmenuDraftRecover').style.display = 'none';
+    _closeHMenu();
+  });
 
 // ─────────────────────────────────────────
 //  LISTENERS — CONFIG BAR

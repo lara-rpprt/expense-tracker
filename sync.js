@@ -191,12 +191,14 @@
   //  UI: BOTÓN DE RECUPERACIÓN DE BORRADOR
   // ─────────────────────────────────────────
   function _updateDraftBtn() {
-    const hasDraft = !!localStorage.getItem(LS_DRAFT_KEY);
-    const btn = document.getElementById('draftRecoverBtn');
-    if (btn) btn.style.display = hasDraft ? 'inline-flex' : 'none';
-    // Also update hamburger menu draft button
-    const hmenuDraft = document.getElementById('hmenuDraftRecover');
-    if (hmenuDraft) hmenuDraft.style.display = hasDraft ? 'block' : 'none';
+    const show  = !!_currentUser && !!localStorage.getItem(LS_DRAFT_KEY);
+    const block = show ? 'block' : 'none';
+
+    const draftActions = document.getElementById('draftActions');
+    const hmenuDraft   = document.getElementById('hmenuDraftRecover');
+
+    if (draftActions) draftActions.style.display = block;
+    if (hmenuDraft)   hmenuDraft.style.display   = block;
   }
 
   // ─────────────────────────────────────────
